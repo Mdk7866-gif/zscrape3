@@ -11,7 +11,7 @@ export default function Navbar() {
       </div>
       <div className="flex items-center gap-4">
         <span className="text-xs text-zinc-500 bg-zinc-100 border border-zinc-200 px-2.5 py-1 rounded-full font-mono">
-          v1.0.0
+          v3.0.0
         </span>
       </div>
     </nav>

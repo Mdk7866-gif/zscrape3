@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/chatgpt", tags=["chatgpt"])
+router = APIRouter(prefix="/chatgpturlchecker", tags=["chatgpturlchecker"])
 
 @router.get("/")
 def read_root():
