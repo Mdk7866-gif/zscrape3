@@ -1,9 +1,11 @@
 "use client";
 
+import { ReactNode } from "react";
+
 // Simple alert/info popup (non-blocking, replaces window.alert)
 interface AlertMessagePopUpProps {
   title: string;
-  message: string;
+  message: string | ReactNode;
   type?: "info" | "success" | "warning" | "error";
   onClose: () => void;
 }
@@ -42,15 +44,15 @@ export default function AlertMessagePopUp({ title, message, type = "info", onClo
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
       <div
-        className={`bg-white rounded-2xl shadow-2xl w-full max-w-sm border ${colors[type]} overflow-hidden`}
+        className={`bg-white rounded-2xl shadow-2xl w-full max-w-md border ${colors[type]} overflow-hidden`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6">
           <div className="flex items-start gap-4">
             <div className="shrink-0 mt-0.5">{icons[type]}</div>
             <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-zinc-900 text-base mb-1">{title}</h3>
-              <p className="text-sm text-zinc-600 leading-relaxed">{message}</p>
+              <h3 className="font-bold text-zinc-900 text-base mb-2">{title}</h3>
+              <div className="text-sm text-zinc-600 leading-relaxed space-y-1">{message}</div>
             </div>
           </div>
         </div>
@@ -66,3 +68,4 @@ export default function AlertMessagePopUp({ title, message, type = "info", onClo
     </div>
   );
 }
+

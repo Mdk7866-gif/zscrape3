@@ -91,29 +91,29 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
     <>
       {/* Main popup */}
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[80vh] overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[80vh] overflow-hidden border-2 border-red-100">
           {/* Header */}
-          <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between shrink-0">
+          <div className="px-6 py-4 border-b border-red-100 bg-red-50 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
-                <span className="text-amber-600 text-lg">⚠️</span>
+              <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
+                <span className="text-red-600 text-lg">⚠️</span>
               </div>
               <div>
-                <h2 className="text-base font-bold text-zinc-900">Failed URLs</h2>
-                <p className="text-xs text-zinc-500">{urls.length} URL{urls.length !== 1 ? "s" : ""} failed to save</p>
+                <h2 className="text-base font-bold text-red-900">Failed URLs</h2>
+                <p className="text-xs text-red-600">{urls.length} URL{urls.length !== 1 ? "s" : ""} failed to save</p>
               </div>
             </div>
-            <button onClick={onClose} className="p-1.5 text-zinc-400 hover:text-zinc-700 rounded-lg hover:bg-zinc-100 transition-colors">
+            <button onClick={onClose} className="p-1.5 text-red-400 hover:text-red-700 rounded-lg hover:bg-red-100 transition-colors">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
 
           {/* Bulk actions bar */}
           {urls.length > 0 && (
-            <div className="px-6 py-3 border-b border-zinc-100 flex items-center gap-3 bg-zinc-50 shrink-0">
+            <div className="px-6 py-3 border-b border-red-100 flex items-center gap-3 bg-red-50/50 shrink-0">
               <button
                 onClick={copyAll}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-zinc-200 hover:border-blue-400 hover:text-blue-600 transition-colors"
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-red-200 hover:border-blue-400 hover:text-blue-600 transition-colors text-red-700"
               >
                 {copiedAll ? (
                   <><svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg> Copied!</>
@@ -123,20 +123,20 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
               </button>
               <button
                 onClick={() => setConfirm({ type: "all" })}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-zinc-200 hover:border-red-400 hover:text-red-600 transition-colors"
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-red-200 hover:border-red-400 hover:text-red-600 transition-colors text-red-700"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
                 Delete All
               </button>
-              <span className="ml-auto text-xs text-zinc-400">{urls.length} total</span>
+              <span className="ml-auto text-xs text-red-400 font-medium">{urls.length} total</span>
             </div>
           )}
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto bg-white">
             {loading ? (
               <div className="flex items-center justify-center py-12">
-                <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
               </div>
             ) : error ? (
               <div className="flex items-center justify-center py-12">
@@ -149,11 +149,11 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
                 <p className="text-sm mt-1">All URLs were saved successfully.</p>
               </div>
             ) : (
-              <ul className="divide-y divide-zinc-100">
+              <ul className="divide-y divide-red-50">
                 {urls.map((item) => (
-                  <li key={item.id} className="flex items-center gap-3 px-6 py-3 hover:bg-zinc-50 group">
+                  <li key={item.id} className="flex items-center gap-3 px-6 py-3 hover:bg-red-50/50 group transition-colors">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-zinc-700 truncate font-mono">{item.url}</p>
+                      <p className="text-xs text-zinc-800 truncate font-mono">{item.url}</p>
                       <p className="text-[10px] text-zinc-400 mt-0.5">
                         {new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                       </p>
@@ -175,7 +175,7 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
                       <button
                         onClick={() => setConfirm({ type: "single", id: item.id })}
                         title="Delete URL"
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        className="p-1.5 rounded-lg text-red-300 hover:text-red-600 hover:bg-red-50 transition-colors"
                       >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                       </button>
@@ -187,8 +187,8 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-4 border-t border-zinc-100 shrink-0">
-            <button onClick={onClose} className="w-full py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors">
+          <div className="px-6 py-4 border-t border-red-100 shrink-0 bg-red-50">
+            <button onClick={onClose} className="w-full py-2 text-sm font-medium text-red-900 hover:bg-red-100 rounded-lg transition-colors border border-red-200 bg-white">
               Close
             </button>
           </div>

@@ -4,7 +4,6 @@ import re
 import shutil
 import tempfile
 import threading
-import time
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -52,26 +51,61 @@ def _get_platform(url: str) -> str:
         return "twitter"
     if "instagram.com" in url_lower:
         return "instagram"
+    if "facebook.com" in url_lower or "fb.watch" in url_lower:
+        return "facebook"
     if "reddit.com" in url_lower or "redd.it" in url_lower:
         return "reddit"
+    if "tiktok.com" in url_lower:
+        return "tiktok"
     return "other"
 
 
-def _get_format_string(platform: str) -> str:
-    """Platform-aware format selection."""
-    if platform in ("twitter", "instagram"):
-        # These platforms serve merged streams; "best" is the only reliable option
-        return "best"
-    if platform == "reddit":
-        return "bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best"
-    # YouTube, TikTok, etc. — prefer h264 mp4 for compatibility
-    return (
-        "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]"
-        "/bestvideo[vcodec^=avc]+bestaudio[ext=m4a]"
-        "/bestvideo[ext=mp4]+bestaudio[ext=m4a]"
-        "/bestvideo+bestaudio"
-        "/best"
-    )
+def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> dict:
+    """
+    Returns yt-dlp options tuned per platform.
+    Key rule: NEVER use FFmpegVideoConvertor (re-encodes, slow, may output AV1).
+    Use FFmpegVideoRemuxer to simply re-wrap into mp4 container (fast, lossless).
+    """
+    base = {
+        "quiet": True,
+        "no_warnings": True,
+        "outtmpl": out_tmpl,
+        "noplaylist": True,
+        "merge_output_format": "mp4",
+        "progress_hooks": [progress_hook],
+        # Remux only (no re-encode), keeps original codec but puts it in mp4
+        "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}],
+        "socket_timeout": 30,
+        "retries": 3,
+        "fragment_retries": 3,
+        "http_headers": {"User-Agent": _USER_AGENT},
+        "concurrent_fragment_downloads": 4,  # faster fragment downloads
+    }
+
+    if platform in ("twitter", "instagram", "facebook", "tiktok"):
+        # These platforms pre-merge video+audio. "best" gets the highest quality merged stream.
+        # We add [vcodec^=avc] preference but fall back to best (might be AV1 on Facebook).
+        # The remuxer will place it in mp4 container without re-encoding.
+        base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[ext=mp4]/best"
+    elif platform == "reddit":
+        # Reddit uses DASH — it always has separate video/audio streams. Pick h264 mp4.
+        # No need for concurrent_fragment_downloads on Reddit (causes issues).
+        base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio/bestvideo[ext=mp4]+bestaudio/best"
+        base["concurrent_fragment_downloads"] = 1
+    else:
+        # YouTube, etc — strongly prefer h264 mp4 for max compatibility
+        base["format"] = (
+            "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]"
+            "/bestvideo[vcodec^=avc]+bestaudio"
+            "/bestvideo[ext=mp4]+bestaudio[ext=m4a]"
+            "/bestvideo+bestaudio"
+            "/best"
+        )
+
+    if platform == "instagram":
+        base["extractor_args"] = {"instagram": {"include_highlights": ["0"]}}
+
+    return base
 
 
 # ── Blocking download worker ───────────────────────────────────────────────────
@@ -89,6 +123,9 @@ def _download_sync(job: dict) -> None:
 
     out_tmpl = os.path.join(tmp_dir, "%(title)s.%(ext)s")
 
+    # Track stream counts to weight progress correctly
+    _stream_ctx = {"total_streams": 1, "current_stream": 0}
+
     def _progress_hook(d: dict) -> None:
         if cancel_event.is_set():
             raise yt_dlp.utils.DownloadError("Cancelled by user")
@@ -99,16 +136,24 @@ def _download_sync(job: dict) -> None:
 
             # Detect whether we're downloading video or audio stream
             info = d.get("info_dict") or {}
-            vcodec = info.get("vcodec", "")
-            acodec = info.get("acodec", "")
-            if vcodec == "none" and acodec:
+            vcodec = (info.get("vcodec") or "").lower()
+            acodec = (info.get("acodec") or "").lower()
+
+            if vcodec == "none" and acodec and acodec != "none":
+                # Pure audio stream (2nd pass in 2-stream download)
                 job["phase"] = "audio"
-                # Audio is the second pass; weight progress 50-94%
-                job["progress"] = 50 + min(44, int(downloaded / total * 44)) if total else 50
+                # Weight: audio = 50→95%
+                pct = int(downloaded / total * 45) if total else 0
+                job["progress"] = min(95, 50 + pct)
             else:
+                # Video stream (or merged single stream)
                 job["phase"] = "video"
-                # Video is the first pass; weight progress 0-50%
-                job["progress"] = min(50, int(downloaded / total * 50)) if total else 0
+                if platform in ("twitter", "instagram", "facebook", "tiktok"):
+                    # Single merged stream → full 0→95%
+                    job["progress"] = min(95, int(downloaded / total * 95)) if total else 0
+                else:
+                    # Separate streams → video = 0→50%
+                    job["progress"] = min(50, int(downloaded / total * 50)) if total else 0
 
             job["downloaded_bytes"] = downloaded
             job["total_bytes"] = total
@@ -117,38 +162,19 @@ def _download_sync(job: dict) -> None:
             job["updated_at"] = datetime.utcnow()
 
         elif d["status"] == "finished":
-            # Stream download done, ffmpeg merging starts
             job["phase"] = "merging"
-            job["progress"] = 96
+            job["progress"] = 97
             job["updated_at"] = datetime.utcnow()
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "format": _get_format_string(platform),
-        "outtmpl": out_tmpl,
-        "noplaylist": True,
-        "merge_output_format": "mp4",
-        "progress_hooks": [_progress_hook],
-        "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
-        "socket_timeout": 60,
-        "retries": 5,
-        "fragment_retries": 5,
-        # Anti-ban: randomised delays between requests
-        "sleep_interval": 1,
-        "max_sleep_interval": 3,
-        "sleep_interval_requests": 1,
-        "http_headers": {"User-Agent": _USER_AGENT},
-    }
-
-    if platform == "instagram":
-        ydl_opts["extractor_args"] = {"instagram": {"include_highlights": ["0"]}}
+    ydl_opts = _get_ydl_opts(platform, out_tmpl, _progress_hook, cancel_event)
 
     try:
         if cancel_event.is_set():
             job["status"] = "cancelled"
             _delete_path(tmp_dir)
             return
+
+        logger.info(f"Starting download for job {job_id}, platform={platform}, url={url}")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -168,14 +194,15 @@ def _download_sync(job: dict) -> None:
                 os.path.join(tmp_dir, f)
                 for f in os.listdir(tmp_dir)
                 if os.path.isfile(os.path.join(tmp_dir, f))
+                   and not f.endswith((".part", ".ytdl"))
             ]
             if not files:
                 raise ValueError("No output file found after download")
+            # Pick the largest file (the merged one)
             file_path = max(files, key=os.path.getsize)
 
         if cancel_event.is_set():
             job["status"] = "cancelled"
-            _delete_path(file_path)
             _delete_path(tmp_dir)
             return
 
@@ -197,6 +224,8 @@ def _download_sync(job: dict) -> None:
             job["status"] = "failed"
             job["error"] = err_str
             logger.error(f"yt-dlp error for job {job_id}: {err_str}")
+        job["phase"] = "done"
+        job["updated_at"] = datetime.utcnow()
         _delete_path(tmp_dir)
 
     except Exception as e:
@@ -216,7 +245,7 @@ class StartDownloadRequest(BaseModel):
 
 @router.post("/start")
 def start_download(request: StartDownloadRequest):
-    # Check if this video is already being downloaded
+    # Check if this video already has an active job
     for existing_job in jobs.values():
         if (existing_job.get("video_id") == request.video_id and
                 existing_job.get("status") in ("queued", "downloading")):
@@ -284,6 +313,7 @@ def get_download_progress(job_id: str):
         "eta": job["eta"],
         "speed": job["speed"],
         "error": job["error"],
+        "filename": job.get("filename"),
     }
 
 
@@ -291,7 +321,6 @@ def get_download_progress(job_id: str):
 def cancel_download(job_id: str):
     job = jobs.get(job_id)
     if not job:
-        # Job not found — treat as already cancelled (idempotent)
         return {"success": True, "job_id": job_id, "status": "cancelled"}
 
     job["cancel_event"].set()

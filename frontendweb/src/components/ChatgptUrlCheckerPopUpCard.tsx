@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, ReactNode } from "react";
 import AlertMessagePopUp from "@/components/AlertMessagePopUp";
 
 interface ChatgptUrlCheckerPopUpCardProps {
@@ -16,7 +16,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("");
-  const [alert, setAlert] = useState<{ title: string; message: string; type?: "success" | "error" | "warning" | "info" } | null>(null);
+  const [alert, setAlert] = useState<{ title: string; message: string | ReactNode; type?: "success" | "error" | "warning" | "info" } | null>(null);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -76,20 +76,31 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       if (!bulkRes.ok) throw new Error("Failed to upload URLs to database");
       
       const resData = await bulkRes.json();
-      // Expecting { saved_count: number, duplicate_count: number, failed_count: number }
       const { saved_count = 0, duplicate_count = 0, failed_count = 0 } = resData;
 
-      let msg = `Successfully added ${saved_count} video(s).`;
-      if (duplicate_count > 0) {
-        msg += ` Skipped ${duplicate_count} duplicate URL(s) already in your folders.`;
-      }
-      if (failed_count > 0) {
-        msg += ` ${failed_count} URL(s) failed metadata extraction and were logged to Failed URLs.`;
-      }
+      const successMessage = (
+        <div className="flex flex-col gap-1 mt-1">
+          {saved_count > 0 && (
+            <div className="text-green-600 font-medium">
+              <span className="mr-1">✅</span> Successfully added {saved_count} video(s).
+            </div>
+          )}
+          {duplicate_count > 0 && (
+            <div className="text-blue-600">
+              <span className="mr-1">ℹ️</span> Skipped {duplicate_count} duplicate URL(s).
+            </div>
+          )}
+          {failed_count > 0 && (
+            <div className="text-red-600">
+              <span className="mr-1">❌</span> {failed_count} URL(s) failed and moved to Failed URLs.
+            </div>
+          )}
+        </div>
+      );
 
       setAlert({
         title: "Upload Complete",
-        message: msg,
+        message: successMessage,
         type: failed_count > 0 ? "warning" : "success",
       });
 
