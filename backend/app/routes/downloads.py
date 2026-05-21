@@ -83,6 +83,7 @@ def _download_sync(job: dict) -> None:
         "no_warnings": True,
         "format": (
             "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]"
+            "/bestvideo[vcodec^=avc]+bestaudio[ext=m4a]"
             "/bestvideo[ext=mp4]+bestaudio[ext=m4a]"
             "/bestvideo+bestaudio"
             "/best"

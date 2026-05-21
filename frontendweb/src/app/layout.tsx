@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "zscrape",
-  description: "A clean, efficient way to manage and scrape video URLs.",
+  title: "zscrape – Video URL Manager",
+  description: "A clean, efficient way to manage, scrape, and download video URLs.",
 };
 
 export default function RootLayout({
@@ -33,8 +33,11 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col h-screen bg-slate-50 text-zinc-900">
         <Navbar />
         <div className="flex flex-1 overflow-hidden">
-          <Sidebar />
-          <main className="flex-1 overflow-y-auto bg-white p-6">
+          {/* Desktop sidebar — hidden on mobile (mobile uses drawer in Navbar) */}
+          <div className="hidden lg:flex lg:w-64 lg:shrink-0 h-full overflow-hidden border-r border-zinc-200">
+            <Sidebar />
+          </div>
+          <main className="flex-1 overflow-y-auto bg-white">
             {children}
           </main>
         </div>
