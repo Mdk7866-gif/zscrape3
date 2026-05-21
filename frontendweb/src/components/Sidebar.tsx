@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 
 interface Folder {
   id: string;
@@ -108,10 +109,10 @@ export default function Sidebar() {
                 key={folder.id}
                 className="group flex items-center justify-between p-2 rounded hover:bg-zinc-200/60 transition-colors text-sm text-zinc-700 hover:text-zinc-950"
               >
-                <span className="truncate pr-2 flex items-center gap-2">
+                <Link href={`/folder/${folder.id}`} className="truncate flex-1 flex items-center gap-2 pr-2">
                   <span className="text-zinc-400">📁</span>
                   {folder.name}
-                </span>
+                </Link>
                 <button
                   onClick={() => deleteFolder(folder.id, folder.name)}
                   className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-600 p-1 rounded transition-all duration-150"
