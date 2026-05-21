@@ -32,8 +32,8 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
   const persistedCompleted = !job && dbStatus === "downloaded";
   const persistedFailed = !job && dbStatus === "failed";
   const persistedCancelled = !job && dbStatus === "cancelled";
-  const persistedPending = !job && dbStatus === "pending";
-  const isFresh = !job && (!dbStatus || dbStatus === "fresh");
+  // If it's pending in the DB but no active job exists, it means the tab was closed/crashed. Treat as fresh so they can start it again.
+  const isFresh = !job && (!dbStatus || dbStatus === "fresh" || dbStatus === "pending");
 
   const startDownload = () => addToQueue(video.id);
   const cancelDownload = () => cancelJob(video.id);

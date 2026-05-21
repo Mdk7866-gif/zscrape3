@@ -25,7 +25,7 @@ Table videos {
 
   duration_seconds integer [not null]
 
-  url text [not null, unique]
+  url text [not null]
 
   platform varchar(50) [not null]
 
@@ -38,6 +38,7 @@ Table videos {
 
   Indexes {
     (folder_id)
+    (folder_id, url) [unique]
     (folder_id, upload_date)
     (folder_id, created_at)
     (platform)

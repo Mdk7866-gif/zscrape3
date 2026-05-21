@@ -44,7 +44,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   const [showDownloadAllConfirm, setShowDownloadAllConfirm] = useState(false);
   const [page, setPage] = useState(1);
 
-  const { addToQueue, jobs, hasActiveDownloads, loadFolderStatuses, downloadDir, pickDownloadDir } = useDownloadQueue();
+  const { addToQueue, jobs, hasActiveDownloads, loadFolderStatuses, downloadDir, pickDownloadDir, cancelAllJobs } = useDownloadQueue();
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   const fetchVideos = async () => {
@@ -170,17 +170,21 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
               <span className="text-base leading-none">⚠️</span> Failed URLs
             </button>
 
-            {/* Download All */}
+            {/* Download All / Cancel All */}
             {paginatedVideos.length > 0 && (
               <button
                 onClick={() => {
-                  if (videosToDownload.length === 0) return;
-                  setShowDownloadAllConfirm(true);
+                  if (hasActiveDownloads) {
+                    cancelAllJobs();
+                  } else {
+                    if (videosToDownload.length === 0) return;
+                    setShowDownloadAllConfirm(true);
+                  }
                 }}
-                disabled={hasActiveDownloads || videosToDownload.length === 0}
+                disabled={!hasActiveDownloads && videosToDownload.length === 0}
                 className={`flex items-center gap-2 font-medium py-2 px-3.5 rounded-lg text-sm transition-all border ${
                   hasActiveDownloads
-                    ? "bg-blue-50 border-blue-200 text-blue-600 cursor-not-allowed"
+                    ? "bg-red-50 border-red-200 text-red-600 hover:bg-red-100 hover:text-red-700"
                     : videosToDownload.length === 0
                     ? "bg-zinc-50 border-zinc-200 text-zinc-400 cursor-not-allowed"
                     : "bg-white border-zinc-300 hover:border-blue-400 hover:bg-blue-50 text-zinc-700 hover:text-blue-700"
@@ -188,8 +192,8 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
               >
                 {hasActiveDownloads ? (
                   <>
-                    <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    Downloading ({activeOnPage} left)
+                    <span className="w-3.5 h-3.5 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                    Cancel All ({activeOnPage})
                   </>
                 ) : videosToDownload.length === 0 ? (
                   <>✅ All Downloaded</>

@@ -65,7 +65,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
     try {
       setLoading(true);
       setError(null);
-      setStatusText(`Extracting metadata and saving ${extractedUrls.length} videos (this may take a bit)...`);
+      setStatusText(`Starting upload...`);
       
       const bulkRes = await fetch(`${API_BASE}/video/bulk-upload`, {
         method: "POST",
@@ -75,8 +75,40 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
 
       if (!bulkRes.ok) throw new Error("Failed to upload URLs to database");
       
-      const resData = await bulkRes.json();
-      const { saved = 0, duplicates = 0, failed = 0 } = resData;
+      const reader = bulkRes.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      let saved = 0;
+      let duplicates = 0;
+      let failed = 0;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line);
+            if (data.type === "start") {
+              setStatusText(`Preparing to add ${data.total} videos...`);
+            } else if (data.type === "progress") {
+              setStatusText(`Adding videos... (${data.processed}/${data.total})`);
+            } else if (data.type === "complete") {
+              saved = data.saved;
+              duplicates = data.duplicates;
+              failed = data.failed;
+            }
+          } catch (e) {
+            console.error("Failed to parse stream chunk", line);
+          }
+        }
+        if (done) break;
+      }
 
       const successMessage = (
         <div className="flex flex-col gap-1 mt-1">
@@ -107,6 +139,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       onSuccess();
     } catch (err: any) {
       setError(err.message || "An error occurred");
+    } finally {
       setLoading(false);
       setStatusText("");
     }

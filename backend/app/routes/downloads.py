@@ -78,6 +78,7 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
+        "file_access_retries": 3,
         "http_headers": {"User-Agent": _USER_AGENT},
         "concurrent_fragment_downloads": 4,  # faster fragment downloads
     }

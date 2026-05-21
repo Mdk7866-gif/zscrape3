@@ -24,6 +24,7 @@ interface DownloadQueueContextType {
   addToQueue: (videoId: string) => void;
   cancelJob: (videoId: string) => void;
   removeJob: (videoId: string) => void;
+  cancelAllJobs: () => Promise<void>;
   /** Load persistent statuses for a folder from the DB */
   loadFolderStatuses: (folderId: string) => Promise<void>;
   downloadDir: string | null;
@@ -276,10 +277,26 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const cancelAllJobs = useCallback(async () => {
+    const jobValues = Object.values(jobs);
+    for (const job of jobValues) {
+      if (job.status === "queued" || job.status === "downloading") {
+        setJobs((prev) => ({
+          ...prev,
+          [job.videoId]: { ...prev[job.videoId], status: "cancelled", phase: "cancelled" },
+        }));
+        syncStatusToDB(job.videoId, "cancelled");
+        if (job.jobId) {
+          fetch(`${API_BASE}/download/cancel/${job.jobId}`, { method: "POST" }).catch(() => {});
+        }
+      }
+    }
+  }, [jobs, API_BASE, syncStatusToDB]);
+
   return (
     <DownloadQueueContext.Provider value={{
       jobs, dbStatuses, hasActiveDownloads,
-      addToQueue, cancelJob, removeJob,
+      addToQueue, cancelJob, removeJob, cancelAllJobs,
       loadFolderStatuses,
       downloadDir, pickDownloadDir,
     }}>

@@ -42,7 +42,10 @@ def extract_video_metadata(url: str) -> dict | None:
         "no_warnings": True,
         "noplaylist": True,
         "extract_flat": False,
-        "socket_timeout": 30,
+        "socket_timeout": 15,
+        "retries": 1,
+        "fragment_retries": 1,
+        "file_access_retries": 1,
         "http_headers": {"User-Agent": _USER_AGENT},
     }
 
