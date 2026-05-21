@@ -5,25 +5,35 @@ from datetime import date
 
 from app.supabase import supabase
 from app.schemas.video import (
-    VideoOut, 
-    VideoDeleteResponse, 
-    BulkVideoUploadRequest, 
+    VideoOut,
+    VideoDeleteResponse,
+    BulkVideoUploadRequest,
     BulkVideoUploadResponse,
     BulkVideoItem
 )
 from app.routes.yt_dlpextractmetadataofvideo import extract_video_metadata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 router = APIRouter(prefix="/video", tags=["video"])
 logger = logging.getLogger(__name__)
 
+
 @router.get("/fetchall", response_model=list[VideoOut])
 def fetch_all_videos(folder_id: UUID):
+    """Fetch all videos in a folder ordered by created_at ascending (so numbering is consistent)."""
     try:
-        response = supabase.table("videos").select("*").eq("folder_id", str(folder_id)).order("created_at", desc=True).execute()
+        response = (
+            supabase.table("videos")
+            .select("*")
+            .eq("folder_id", str(folder_id))
+            .order("created_at", desc=False)
+            .execute()
+        )
         return response.data
     except Exception as e:
         logger.error(f"Error fetching videos: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch videos")
+
 
 @router.delete("/delete/{video_id}", response_model=VideoDeleteResponse)
 def delete_video(video_id: UUID):
@@ -38,80 +48,132 @@ def delete_video(video_id: UUID):
         logger.error(f"Error deleting video: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete video")
 
-from concurrent.futures import ThreadPoolExecutor
 
 @router.post("/bulk-upload", response_model=BulkVideoUploadResponse)
 def bulk_upload_videos(request: BulkVideoUploadRequest):
-    results = []
+    """
+    1. Fetch metadata for all URLs concurrently (slow network step).
+    2. Count existing videos in folder to assign sequential numbering.
+    3. Insert videos sequentially with numbered titles.
+    4. Insert initial 'fresh' download status for each saved video.
+    """
     saved_count = 0
     duplicate_count = 0
     failed_count = 0
+    results: list[BulkVideoItem] = []
 
-    def process_url(raw_url: str):
-        url = raw_url.strip()
-        if not url:
-            return None
-            
-        metadata = extract_video_metadata(url)
-        if not metadata:
+    # ── Step 1: Fetch metadata concurrently ─────────────────────────────────
+    urls = [u.strip() for u in request.urls if u.strip()]
+
+    def fetch_meta(url: str):
+        return url, extract_video_metadata(url)
+
+    url_meta_pairs: list[tuple[str, dict | None]] = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_meta, url): url for url in urls}
+        # Preserve input order
+        ordered = [None] * len(urls)
+        for future in as_completed(futures):
+            url, meta = future.result()
+            idx = urls.index(url)
+            ordered[idx] = (url, meta)
+        url_meta_pairs = [p for p in ordered if p is not None]
+
+    # ── Step 2: Count existing videos for numbering ──────────────────────────
+    try:
+        count_res = (
+            supabase.table("videos")
+            .select("id", count="exact")
+            .eq("folder_id", str(request.folder_id))
+            .execute()
+        )
+        existing_count = count_res.count or 0
+    except Exception:
+        existing_count = 0
+
+    next_number = existing_count + 1
+
+    # ── Step 3: Insert videos sequentially with numbering ────────────────────
+    for raw_url, metadata in url_meta_pairs:
+        if metadata is None:
+            # Log failed URL
             try:
                 supabase.table("failed_save_urls").insert({
                     "folder_id": str(request.folder_id),
-                    "url": url
+                    "url": raw_url,
                 }).execute()
             except Exception:
                 pass
-            
-            return BulkVideoItem(raw_url=raw_url, success=False, error="Failed to extract metadata")
-            
+            results.append(BulkVideoItem(raw_url=raw_url, success=False, error="Failed to extract metadata"))
+            failed_count += 1
+            continue
+
+        numbered_title = f"{next_number}) {metadata['title']}"
+
         try:
             insert_data = {
                 "folder_id": str(request.folder_id),
-                "title": metadata["title"],
+                "title": numbered_title,
                 "duration_seconds": metadata["duration_seconds"],
-                "url": url,
+                "url": raw_url,
                 "platform": metadata["platform"],
                 "thumbnail": metadata["thumbnail"],
-                "upload_date": date.today().isoformat()
+                "upload_date": metadata.get("upload_date") or date.today().isoformat(),
             }
             response = supabase.table("videos").insert(insert_data).execute()
-            
-            if response.data:
-                return BulkVideoItem(
-                    raw_url=raw_url, cleaned_url=url, success=True,
-                    inserted_id=response.data[0]["id"], title=metadata["title"],
-                    platform=metadata["platform"], thumbnail=metadata["thumbnail"]
-                )
-        except Exception as e:
-            if "duplicate key value violates unique constraint" in str(e):
-                return BulkVideoItem(raw_url=raw_url, cleaned_url=url, success=False, is_duplicate=True, error="Video URL already exists")
-            try:
-                supabase.table("failed_save_urls").insert({"folder_id": str(request.folder_id), "url": url}).execute()
-            except Exception:
-                pass
-            return BulkVideoItem(raw_url=raw_url, cleaned_url=url, success=False, error="Database insertion error")
-        return None
 
-    # Use ThreadPoolExecutor to run extractions concurrently
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        url_results = list(executor.map(process_url, request.urls))
-        
-    for res in url_results:
-        if res:
-            results.append(res)
-            if res.success:
+            if response.data:
+                inserted_id = response.data[0]["id"]
+                next_number += 1
                 saved_count += 1
-            elif getattr(res, 'is_duplicate', False):
-                duplicate_count += 1
+
+                # Insert initial 'fresh' download status
+                try:
+                    supabase.table("video_download_status").insert({
+                        "video_id": inserted_id,
+                        "status": "fresh",
+                    }).execute()
+                except Exception as e:
+                    logger.warning(f"Could not insert download status for {inserted_id}: {e}")
+
+                results.append(BulkVideoItem(
+                    raw_url=raw_url,
+                    cleaned_url=raw_url,
+                    success=True,
+                    inserted_id=inserted_id,
+                    title=numbered_title,
+                    platform=metadata["platform"],
+                    thumbnail=metadata["thumbnail"],
+                ))
             else:
                 failed_count += 1
+                results.append(BulkVideoItem(raw_url=raw_url, success=False, error="No data returned"))
+
+        except Exception as e:
+            err_str = str(e)
+            if "duplicate key value violates unique constraint" in err_str:
+                duplicate_count += 1
+                results.append(BulkVideoItem(
+                    raw_url=raw_url, cleaned_url=raw_url,
+                    success=False, is_duplicate=True, error="Video URL already exists in your library",
+                ))
+            else:
+                try:
+                    supabase.table("failed_save_urls").insert({
+                        "folder_id": str(request.folder_id),
+                        "url": raw_url,
+                    }).execute()
+                except Exception:
+                    pass
+                failed_count += 1
+                results.append(BulkVideoItem(raw_url=raw_url, success=False, error="Database insertion error"))
 
     return BulkVideoUploadResponse(
         success=True,
         folder_id=request.folder_id,
-        total=len(request.urls),
+        total=len(urls),
         saved=saved_count,
         duplicates=duplicate_count,
         failed=failed_count,
-        results=results
+        results=results,
     )

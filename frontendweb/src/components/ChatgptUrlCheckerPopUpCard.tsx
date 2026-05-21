@@ -76,23 +76,23 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       if (!bulkRes.ok) throw new Error("Failed to upload URLs to database");
       
       const resData = await bulkRes.json();
-      const { saved_count = 0, duplicate_count = 0, failed_count = 0 } = resData;
+      const { saved = 0, duplicates = 0, failed = 0 } = resData;
 
       const successMessage = (
         <div className="flex flex-col gap-1 mt-1">
-          {saved_count > 0 && (
+          {saved > 0 && (
             <div className="text-green-600 font-medium">
-              <span className="mr-1">✅</span> Successfully added {saved_count} video(s).
+              <span className="mr-1">✅</span> Successfully added {saved} video(s).
             </div>
           )}
-          {duplicate_count > 0 && (
+          {duplicates > 0 && (
             <div className="text-blue-600">
-              <span className="mr-1">ℹ️</span> Skipped {duplicate_count} duplicate URL(s).
+              <span className="mr-1">ℹ️</span> Skipped {duplicates} duplicate URL(s).
             </div>
           )}
-          {failed_count > 0 && (
+          {failed > 0 && (
             <div className="text-red-600">
-              <span className="mr-1">❌</span> {failed_count} URL(s) failed and moved to Failed URLs.
+              <span className="mr-1">❌</span> {failed} URL(s) failed and moved to Failed URLs.
             </div>
           )}
         </div>
@@ -101,7 +101,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       setAlert({
         title: "Upload Complete",
         message: successMessage,
-        type: failed_count > 0 ? "warning" : "success",
+        type: failed > 0 ? "warning" : "success",
       });
 
       onSuccess();

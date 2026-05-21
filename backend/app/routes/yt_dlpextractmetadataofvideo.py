@@ -93,7 +93,19 @@ def extract_video_metadata(url: str) -> dict | None:
                 "platform": platform if platform != "unknown" else info_dict.get("extractor_key", "unknown").lower(),
                 "thumbnail": thumbnail,
                 "url": url,
+                # Original upload date from the platform (format: YYYYMMDD string or None)
+                "upload_date": _parse_upload_date(info_dict.get("upload_date")),
             }
     except Exception as e:
         logger.error(f"Failed to extract metadata for {url}: {e}")
+        return None
+
+
+def _parse_upload_date(raw: str | None) -> str | None:
+    """Convert yt-dlp's YYYYMMDD date string to an ISO date (YYYY-MM-DD), or None."""
+    if not raw or len(raw) != 8:
+        return None
+    try:
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+    except Exception:
         return None

@@ -6,6 +6,7 @@ from app.routes import (
    crudfolders,
    crudvideos,
    proxy,
+   video_download_status,
 )
 
 api_router = APIRouter()
@@ -16,3 +17,4 @@ api_router.include_router(failed_urls.router)
 api_router.include_router(crudfolders.router)
 api_router.include_router(crudvideos.router)
 api_router.include_router(proxy.router)
+api_router.include_router(video_download_status.router)

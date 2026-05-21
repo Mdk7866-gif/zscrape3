@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useDownloadQueue } from "@/components/DownloadQueueContext";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
 
@@ -15,19 +15,34 @@ interface VideoData {
 }
 
 export default function VideoDataCard({ video, onDelete }: { video: VideoData, onDelete: (id: string) => void }) {
-  const { jobs, addToQueue, cancelJob, removeJob } = useDownloadQueue();
+  const { jobs, dbStatuses, addToQueue, cancelJob, removeJob } = useDownloadQueue();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRedownloadConfirm, setShowRedownloadConfirm] = useState(false);
 
   const job = jobs[video.id];
+  const dbStatus = dbStatuses[video.id]; // persisted status from DB
+
   const isQueued = job?.status === "queued";
   const isDownloading = job && ["queued", "downloading"].includes(job.status);
   const isCompleted = job?.status === "completed";
   const isError = job?.status === "failed";
   const isCancelled = job?.status === "cancelled";
 
+  // Use DB status when no active job in this session
+  const persistedCompleted = !job && dbStatus === "downloaded";
+  const persistedFailed = !job && dbStatus === "failed";
+  const persistedCancelled = !job && dbStatus === "cancelled";
+  const persistedPending = !job && dbStatus === "pending";
+  const isFresh = !job && (!dbStatus || dbStatus === "fresh");
+
   const startDownload = () => addToQueue(video.id);
   const cancelDownload = () => cancelJob(video.id);
   const dismissState = () => removeJob(video.id);
+
+  const handleRedownload = () => {
+    setShowRedownloadConfirm(false);
+    addToQueue(video.id);
+  };
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -122,16 +137,18 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
 
           {/* Bottom action area — always at bottom */}
           <div className="mt-auto pointer-events-auto">
-            {/* Completed */}
+
+            {/* ── Session: Completed ── */}
             {isCompleted && (
               <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                 <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
                 <span className="text-xs text-green-700 font-medium flex-1">Downloaded!</span>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline mr-1">Re-download</button>
                 <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs">✕</button>
               </div>
             )}
 
-            {/* Failed */}
+            {/* ── Session: Failed ── */}
             {isError && (
               <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                 <svg className="w-4 h-4 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
@@ -139,19 +156,46 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
                   <p className="text-xs text-red-700 font-medium">Download Failed</p>
                   <p className="text-[10px] text-red-500 truncate" title={job.error}>{job.error || "Unknown error"}</p>
                 </div>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline shrink-0 mr-1">Retry</button>
                 <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs shrink-0">✕</button>
               </div>
             )}
 
-            {/* Cancelled */}
+            {/* ── Session: Cancelled ── */}
             {isCancelled && (
               <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2">
                 <span className="text-xs text-zinc-500 flex-1">Cancelled</span>
-                <button onClick={dismissState} className="text-xs text-blue-600 hover:underline font-medium">Retry</button>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-xs text-blue-600 hover:underline font-medium">Retry</button>
               </div>
             )}
 
-            {/* Downloading / queued */}
+            {/* ── Persistent: Downloaded (from previous session) ── */}
+            {persistedCompleted && (
+              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
+                <span className="text-xs text-green-700 font-medium flex-1">Already Downloaded</span>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline">Re-download</button>
+              </div>
+            )}
+
+            {/* ── Persistent: Failed (from previous session) ── */}
+            {persistedFailed && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                <span className="text-xs text-red-700 font-medium flex-1">Previously Failed</span>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline">Retry</button>
+              </div>
+            )}
+
+            {/* ── Persistent: Cancelled (from previous session) ── */}
+            {persistedCancelled && (
+              <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2">
+                <span className="text-xs text-zinc-500 flex-1">Previously Cancelled</span>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline font-medium">Download</button>
+              </div>
+            )}
+
+            {/* ── Downloading / Queued ── */}
             {isDownloading && (
               <div className="space-y-1.5">
                 <div className="flex justify-between items-center text-[10px]">
@@ -159,10 +203,7 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
                   <span className="text-zinc-500 shrink-0">{job.progress.toFixed(0)}%</span>
                 </div>
                 <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-150 ease-out"
-                    style={{ width: `${job.progress}%` }}
-                  />
+                  <div className="h-full bg-blue-500 transition-all duration-150 ease-out" style={{ width: `${job.progress}%` }} />
                 </div>
                 <div className="flex justify-end">
                   <button onClick={cancelDownload} className="text-[10px] text-red-500 hover:text-red-700 font-medium px-2 py-0.5 hover:bg-red-50 rounded transition-colors">
@@ -172,8 +213,8 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
               </div>
             )}
 
-            {/* Default buttons */}
-            {!job && (
+            {/* ── Fresh: never touched ── */}
+            {isFresh && (
               <div className="flex gap-2">
                 <button
                   onClick={startDownload}
@@ -195,6 +236,7 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
         </div>
       </div>
 
+      {/* Delete confirmation */}
       {showDeleteConfirm && (
         <ConformationMessagePopUp
           title="Delete Video?"
@@ -208,6 +250,18 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
           onCancel={() => setShowDeleteConfirm(false)}
         />
       )}
+
+      {/* Re-download confirmation */}
+      {showRedownloadConfirm && (
+        <ConformationMessagePopUp
+          title="Download Again?"
+          message="This video has already been downloaded or previously attempted. Do you want to download it again?"
+          confirmLabel="Download Again"
+          onConfirm={handleRedownload}
+          onCancel={() => setShowRedownloadConfirm(false)}
+        />
+      )}
     </>
   );
 }
+
