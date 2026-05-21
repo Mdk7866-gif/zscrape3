@@ -18,3 +18,11 @@ class UrlCheckerResponse(BaseModel):
     corrected_count: int
     failed_count: int
     items: list[UrlCheckItem]
+
+
+class ChatRequest(BaseModel):
+    query: str
+
+
+class ChatResponse(BaseModel):
+    urls: list[str]
