@@ -13,6 +13,7 @@ def extract_video_metadata(url: str) -> dict | None:
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False, # Need full metadata
+        'noplaylist': True,
     }
 
     try:

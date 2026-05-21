@@ -1,180 +1,277 @@
 import logging
-import asyncio
+import os
+import re
+import shutil
+import tempfile
+import threading
 import uuid
-import yt_dlp
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel
-from uuid import UUID
+from typing import Optional
+
+import yt_dlp
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from app.supabase import supabase
-from app.config import settings
-from app.schemas.download import (
-    StartDownloadRequest, 
-    DownloadStartResponse, 
-    DownloadProgressResponse, 
-    CancelDownloadResponse
-)
 
 router = APIRouter(prefix="/download", tags=["download"])
 logger = logging.getLogger(__name__)
 
-# Global dictionary to track jobs: job_id -> dict with progress state
-jobs = {}
+# ── Global job store ──────────────────────────────────────────────────────────
+# job_id -> dict with all state
+jobs: dict[str, dict] = {}
 
-class ProgressHook:
-    def __init__(self, job_id: str):
-        self.job_id = job_id
-        
-    def __call__(self, d):
-        job = jobs.get(self.job_id)
-        if not job:
-            return
-            
-        if d['status'] == 'downloading':
-            job['status'] = 'downloading'
-            
-            # Extract progress stats safely
-            try:
-                # Remove ANSI escape codes and % sign if it's a string, or calculate if bytes available
-                if '_percent_str' in d:
-                    pct_str = d['_percent_str'].replace('%', '').strip()
-                    # ANSI escape code regex cleaning might be needed if yt-dlp outputs them
-                    import re
-                    pct_str = re.sub(r'\x1b[^m]*m', '', pct_str)
-                    job['progress'] = float(pct_str)
-            except Exception:
-                pass
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-            job['downloaded_bytes'] = d.get('downloaded_bytes', 0)
-            job['total_bytes'] = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-            job['eta'] = d.get('eta')
-            job['speed'] = d.get('speed')
-            job['filename'] = d.get('filename')
-            job['updated_at'] = datetime.utcnow()
-            
-        elif d['status'] == 'finished':
-            job['status'] = 'finished'
-            job['progress'] = 100.0
-            job['filename'] = d.get('filename')
-            job['updated_at'] = datetime.utcnow()
+def _delete_path(path: str) -> None:
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
 
-async def download_task(job_id: str, url: str):
-    """Background task to run yt-dlp"""
-    job = jobs.get(job_id)
-    if not job:
-        return
-        
-    job['status'] = 'starting'
-    
+
+def _safe_filename(name: str) -> str:
+    name = re.sub(r'[\\/*?:"<>|]', "", name)
+    name = name.strip().replace(" ", "_")
+    return name[:100] or "video"
+
+
+# ── Blocking download (runs in thread pool) ───────────────────────────────────
+
+def _download_sync(job: dict) -> None:
+    """
+    Runs in a background thread. Downloads the video using yt-dlp into a
+    per-job temp directory, then sets job['file_path'] and job['filename']
+    on success.
+    """
+    job_id = job["job_id"]
+    url = job["url"]
+    cancel_event: threading.Event = job["cancel_event"]
+
+    tmp_dir = tempfile.mkdtemp(prefix="zscrape_dl_")
+    job["tmp_dir"] = tmp_dir
+    job["status"] = "downloading"
+
+    out_tmpl = os.path.join(tmp_dir, "%(title)s.%(ext)s")
+
+    def _progress_hook(d: dict) -> None:
+        if cancel_event.is_set():
+            raise yt_dlp.utils.DownloadError("Cancelled by user")
+
+        if d["status"] == "downloading":
+            downloaded = d.get("downloaded_bytes") or 0
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            job["downloaded_bytes"] = downloaded
+            job["total_bytes"] = total
+            job["speed"] = d.get("speed") or 0.0
+            job["eta"] = d.get("eta") or 0
+            # Cap at 94% — last 6% is for ffmpeg merge
+            job["progress"] = min(94, int(downloaded / total * 94)) if total else 0
+            job["updated_at"] = datetime.utcnow()
+
+        elif d["status"] == "finished":
+            # Single stream finished, ffmpeg merging may still happen
+            job["progress"] = 96
+            job["updated_at"] = datetime.utcnow()
+
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': f'{settings.DOWNLOADS_DIR}/%(title)s.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-        'progress_hooks': [ProgressHook(job_id)],
+        "quiet": True,
+        "no_warnings": True,
+        "format": (
+            "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]"
+            "/bestvideo[ext=mp4]+bestaudio[ext=m4a]"
+            "/bestvideo+bestaudio"
+            "/best"
+        ),
+        "outtmpl": out_tmpl,
+        "noplaylist": True,
+        "merge_output_format": "mp4",
+        "progress_hooks": [_progress_hook],
+        "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
+        "socket_timeout": 60,
+        "retries": 5,
+        "fragment_retries": 5,
     }
-    
-    try:
-        # Run yt-dlp in a separate thread so it doesn't block the async event loop
-        def run_ydl():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-                
-        await asyncio.to_thread(run_ydl)
-        
-        # Check if job was cancelled
-        if jobs.get(job_id, {}).get('status') == 'cancelled':
-            return
-            
-        job['status'] = 'completed'
-        job['progress'] = 100.0
-        job['updated_at'] = datetime.utcnow()
-    except Exception as e:
-        logger.error(f"Download failed for job {job_id}: {e}")
-        job['status'] = 'failed'
-        job['error'] = str(e)
-        job['updated_at'] = datetime.utcnow()
 
-@router.post("/start", response_model=DownloadStartResponse)
-def start_download(request: StartDownloadRequest, background_tasks: BackgroundTasks):
     try:
-        # Fetch the video URL from Supabase
-        response = supabase.table("videos").select("url").eq("id", str(request.video_id)).execute()
+        if cancel_event.is_set():
+            job["status"] = "cancelled"
+            _delete_path(tmp_dir)
+            return
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+
+        if info is None:
+            raise ValueError("yt-dlp returned no info")
+
+        # Resolve the final output file path
+        file_path: Optional[str] = None
+        try:
+            file_path = info["requested_downloads"][0]["filepath"]
+        except (KeyError, IndexError, TypeError):
+            pass
+
+        if not file_path or not os.path.exists(file_path):
+            # Fallback: find the largest file in tmp_dir
+            files = [
+                os.path.join(tmp_dir, f)
+                for f in os.listdir(tmp_dir)
+                if os.path.isfile(os.path.join(tmp_dir, f))
+            ]
+            if not files:
+                raise ValueError("No output file found after download")
+            file_path = max(files, key=os.path.getsize)
+
+        if cancel_event.is_set():
+            job["status"] = "cancelled"
+            _delete_path(file_path)
+            _delete_path(tmp_dir)
+            return
+
+        raw_title = info.get("title") or "video"
+        ext = os.path.splitext(file_path)[1] or ".mp4"
+        job["filename"] = _safe_filename(raw_title) + ext
+        job["file_path"] = file_path
+        job["status"] = "completed"
+        job["progress"] = 100
+        job["updated_at"] = datetime.utcnow()
+        logger.info(f"Download completed: {file_path}")
+
+    except yt_dlp.utils.DownloadError as e:
+        err_str = str(e)
+        if "Cancelled" in err_str or cancel_event.is_set():
+            job["status"] = "cancelled"
+        else:
+            job["status"] = "failed"
+            job["error"] = err_str
+            logger.error(f"yt-dlp error for job {job_id}: {err_str}")
+        _delete_path(tmp_dir)
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["error"] = str(e)
+        job["updated_at"] = datetime.utcnow()
+        logger.error(f"Download error for job {job_id}: {e}")
+        _delete_path(tmp_dir)
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel
+
+class StartDownloadRequest(BaseModel):
+    video_id: str
+
+
+@router.post("/start")
+def start_download(request: StartDownloadRequest):
+    # Fetch the video URL from Supabase
+    try:
+        response = supabase.table("videos").select("url").eq("id", request.video_id).execute()
         if not response.data:
             raise HTTPException(status_code=404, detail="Video not found")
-            
         video_url = response.data[0]["url"]
-        
-        # Create a job
-        job_id = str(uuid.uuid4())
-        now = datetime.utcnow()
-        
-        jobs[job_id] = {
-            "job_id": job_id,
-            "video_id": request.video_id,
-            "status": "queued",
-            "progress": 0.0,
-            "downloaded_bytes": None,
-            "total_bytes": None,
-            "eta": None,
-            "speed": None,
-            "filename": None,
-            "error": None,
-            "created_at": now,
-            "updated_at": now
-        }
-        
-        background_tasks.add_task(download_task, job_id, video_url)
-        
-        return DownloadStartResponse(
-            success=True,
-            job_id=job_id,
-            video_id=request.video_id,
-            status="queued"
-        )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error starting download: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start download")
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
-@router.get("/progress/{job_id}", response_model=DownloadProgressResponse)
+    job_id = str(uuid.uuid4())
+    now = datetime.utcnow()
+
+    job = {
+        "job_id": job_id,
+        "video_id": request.video_id,
+        "url": video_url,
+        "status": "queued",
+        "progress": 0,
+        "downloaded_bytes": 0,
+        "total_bytes": 0,
+        "eta": 0,
+        "speed": 0.0,
+        "filename": None,
+        "file_path": None,
+        "tmp_dir": None,
+        "error": None,
+        "cancel_event": threading.Event(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    jobs[job_id] = job
+
+    # Start download in a background daemon thread
+    t = threading.Thread(target=_download_sync, args=(job,), daemon=True)
+    t.start()
+
+    return {"success": True, "job_id": job_id, "status": "queued"}
+
+
+@router.get("/progress/{job_id}")
 def get_download_progress(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
-    return DownloadProgressResponse(
-        success=True,
-        job_id=job_id,
-        status=job["status"],
-        progress=job["progress"],
-        downloaded_bytes=job["downloaded_bytes"],
-        total_bytes=job["total_bytes"],
-        eta=job["eta"],
-        speed=job["speed"],
-        filename=job["filename"],
-        error=job["error"],
-        created_at=job["created_at"],
-        updated_at=job["updated_at"]
-    )
 
-@router.post("/cancel/{job_id}", response_model=CancelDownloadResponse)
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": job["status"],
+        "progress": job["progress"],
+        "downloaded_bytes": job["downloaded_bytes"],
+        "total_bytes": job["total_bytes"],
+        "eta": job["eta"],
+        "speed": job["speed"],
+        "error": job["error"],
+    }
+
+
+@router.post("/cancel/{job_id}")
 def cancel_download(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
+
+    job["cancel_event"].set()
     job["status"] = "cancelled"
     job["updated_at"] = datetime.utcnow()
-    
-    # Note: Cancelling a running thread with yt-dlp is tricky in python.
-    # The safest way without monkey-patching yt-dlp deeply is letting it finish or error out,
-    # but we can set the status to cancelled so the frontend stops polling.
-    
-    return CancelDownloadResponse(
-        success=True,
-        job_id=job_id,
-        status="cancelled"
+
+    return {"success": True, "job_id": job_id, "status": "cancelled"}
+
+
+@router.get("/file/{job_id}")
+def serve_file(job_id: str):
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] == "failed":
+        raise HTTPException(status_code=422, detail=job.get("error", "Download failed"))
+    if job["status"] == "cancelled":
+        raise HTTPException(status_code=410, detail="Download was cancelled")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=425, detail=f"File not ready yet (status: {job['status']})")
+
+    file_path = job.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    filename = job.get("filename") or os.path.basename(file_path)
+    tmp_dir = job.get("tmp_dir")
+
+    def cleanup():
+        _delete_path(file_path)
+        if tmp_dir:
+            _delete_path(tmp_dir)
+        jobs.pop(job_id, None)
+
+    return FileResponse(
+        path=file_path,
+        media_type="video/mp4",
+        filename=filename,
+        background=BackgroundTask(cleanup),
     )

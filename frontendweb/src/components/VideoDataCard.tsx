@@ -9,6 +9,7 @@ interface VideoData {
   thumbnail?: string;
   duration_seconds: number;
   url: string;
+  upload_date?: string;
 }
 
 export default function VideoDataCard({ video, onDelete }: { video: VideoData, onDelete: (id: string) => void }) {
@@ -52,9 +53,10 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (jobId && downloading) {
+      const capturedJobId = jobId; // capture before state can change
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`${API_BASE}/download/progress/${jobId}`);
+          const res = await fetch(`${API_BASE}/download/progress/${capturedJobId}`);
           if (!res.ok) {
             if (res.status === 404) {
               setDownloading(false);
@@ -65,11 +67,18 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
           }
           const data = await res.json();
           setProgress(data.progress);
-          if (data.status === "finished" || data.status === "completed") {
+          if (data.status === "completed") {
+            clearInterval(interval);
             setDownloading(false);
             setJobId(null);
             setProgress(100);
-            clearInterval(interval);
+            // Trigger browser file download without navigating away
+            const a = document.createElement("a");
+            a.href = `${API_BASE}/download/file/${capturedJobId}`;
+            a.download = "";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
           } else if (data.status === "failed" || data.status === "cancelled") {
             setError(data.error || "Download cancelled or failed");
             setDownloading(false);
@@ -91,8 +100,8 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
   };
 
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col">
-      <div className="relative aspect-video bg-zinc-100 flex items-center justify-center">
+    <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col h-[340px] w-full">
+      <div className="relative h-[160px] w-full bg-zinc-100 flex items-center justify-center shrink-0">
         {video.thumbnail ? (
           <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" />
         ) : (
@@ -110,6 +119,9 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
           <span className="uppercase tracking-wider font-semibold text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">
             {video.platform}
           </span>
+          {video.upload_date && (
+            <span>Uploaded: {video.upload_date}</span>
+          )}
         </div>
         
         {error && <div className="text-xs text-red-600 mb-2">{error}</div>}

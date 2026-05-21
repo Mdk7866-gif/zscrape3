@@ -21,8 +21,8 @@ class DownloadProgressResponse(BaseModel):
     status: str
     progress: float
     downloaded_bytes: int | None = None
-    total_bytes: int | None = None
-    eta: int | None = None
+    total_bytes: float | None = None
+    eta: float | None = None
     speed: float | None = None
     filename: str | None = None
     error: str | None = None
