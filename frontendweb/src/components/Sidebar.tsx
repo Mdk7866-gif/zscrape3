@@ -90,6 +90,19 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
 
       {/* Folder list */}
       <div className="flex-1 overflow-y-auto py-2">
+        <div className="px-2 mb-4">
+          <Link
+            href="/"
+            onClick={onClose}
+            className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+              pathname === "/" ? "bg-blue-50 text-blue-700 font-medium" : "text-zinc-700 hover:bg-zinc-200/60"
+            }`}
+          >
+            <span className="shrink-0 text-lg">🏠</span>
+            <span>Home</span>
+          </Link>
+        </div>
+        
         {error && (
           <div className="mx-3 mb-2 text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded">
             {error}
@@ -110,17 +123,17 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
                       onClick={onClose}
                       className={`flex-1 flex items-center gap-2 px-3 py-2 text-sm min-w-0 ${isActive ? "text-blue-700 font-medium" : "text-zinc-700"}`}
                     >
-                      <span className="shrink-0">📁</span>
+                      <span className="shrink-0 text-lg">📁</span>
                       <span className="truncate">{folder.name}</span>
                     </Link>
-                    {/* Delete button — always visible on touch, hover on desktop */}
+                    {/* Delete button — always visible to avoid mobile issues */}
                     <button
                       onClick={() => deleteFolder(folder.id, folder.name)}
-                      className="shrink-0 mr-1 p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all"
+                      className="shrink-0 mr-1 p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded opacity-100 transition-all focus:outline-none"
                       title="Delete Folder"
                       aria-label={`Delete folder ${folder.name}`}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                         <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
                       </svg>

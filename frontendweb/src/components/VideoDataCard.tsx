@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useDownloadQueue } from "@/components/DownloadQueueContext";
+import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
 
 interface VideoData {
   id: string;
@@ -13,85 +15,24 @@ interface VideoData {
 }
 
 export default function VideoDataCard({ video, onDelete }: { video: VideoData, onDelete: (id: string) => void }) {
-  const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { jobs, addToQueue, cancelJob, removeJob } = useDownloadQueue();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const job = jobs[video.id];
+  const isDownloading = job && ["queued", "downloading"].includes(job.status);
+  const isError = job && job.status === "failed";
 
-  const startDownload = async () => {
-    try {
-      setDownloading(true);
-      setError(null);
-      const res = await fetch(`${API_BASE}/download/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: video.id }),
-      });
-      if (!res.ok) throw new Error("Failed to start download");
-      const data = await res.json();
-      setJobId(data.job_id);
-    } catch (err: any) {
-      setError(err.message);
-      setDownloading(false);
-    }
+  const startDownload = () => {
+    addToQueue(video.id);
   };
 
-  const cancelDownload = async () => {
-    if (!jobId) return;
-    try {
-      await fetch(`${API_BASE}/download/cancel/${jobId}`, { method: "POST" });
-      setDownloading(false);
-      setJobId(null);
-      setProgress(0);
-    } catch (err) {
-      console.error(err);
-    }
+  const cancelDownload = () => {
+    cancelJob(video.id);
   };
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (jobId && downloading) {
-      const capturedJobId = jobId; // capture before state can change
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_BASE}/download/progress/${capturedJobId}`);
-          if (!res.ok) {
-            if (res.status === 404) {
-              setDownloading(false);
-              setJobId(null);
-              clearInterval(interval);
-            }
-            return;
-          }
-          const data = await res.json();
-          setProgress(data.progress);
-          if (data.status === "completed") {
-            clearInterval(interval);
-            setDownloading(false);
-            setJobId(null);
-            setProgress(100);
-            // Trigger browser file download without navigating away
-            const a = document.createElement("a");
-            a.href = `${API_BASE}/download/file/${capturedJobId}`;
-            a.download = "";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          } else if (data.status === "failed" || data.status === "cancelled") {
-            setError(data.error || "Download cancelled or failed");
-            setDownloading(false);
-            setJobId(null);
-            clearInterval(interval);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [jobId, downloading]);
+  const dismissError = () => {
+    removeJob(video.id);
+  };
 
   const formatDuration = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -99,65 +40,99 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
+  const getPhaseText = () => {
+    if (!job) return "";
+    if (job.status === "queued") return "Waiting in queue...";
+    if (job.phase === "starting") return "Starting...";
+    if (job.phase === "video") return "Downloading video...";
+    if (job.phase === "audio") return "Downloading audio...";
+    if (job.phase === "merging") return "Merging formats...";
+    if (job.phase === "done") return "Done!";
+    return "Downloading...";
+  };
+
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col h-[340px] w-full">
-      <div className="relative h-[160px] w-full bg-zinc-100 flex items-center justify-center shrink-0">
-        {video.thumbnail ? (
-          <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" />
-        ) : (
-          <span className="text-zinc-400">No Thumbnail</span>
-        )}
-        <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded font-medium">
-          {formatDuration(video.duration_seconds)}
+    <>
+      <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col mx-auto w-full max-w-[260px] h-[360px]">
+        <div className="relative h-[150px] w-full bg-zinc-100 flex items-center justify-center shrink-0">
+          {video.thumbnail ? (
+            <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-zinc-400 text-sm">No Thumbnail</span>
+          )}
+          <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
+            {formatDuration(video.duration_seconds)}
+          </div>
         </div>
-      </div>
-      <div className="p-4 flex flex-col flex-1">
-        <h3 className="font-semibold text-zinc-900 text-sm line-clamp-2 mb-2 flex-1" title={video.title}>
-          {video.title}
-        </h3>
-        <div className="flex items-center justify-between text-xs text-zinc-500 mb-4">
-          <span className="uppercase tracking-wider font-semibold text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">
-            {video.platform}
-          </span>
-          {video.upload_date && (
-            <span>Uploaded: {video.upload_date}</span>
+        <div className="p-3.5 flex flex-col flex-1">
+          <h3 className="font-semibold text-zinc-900 text-sm line-clamp-2 mb-2 flex-1" title={video.title}>
+            {video.title}
+          </h3>
+          <div className="flex items-center justify-between text-[11px] text-zinc-500 mb-3">
+            <span className="uppercase tracking-wider font-semibold text-[9px] bg-zinc-100 border border-zinc-200 text-zinc-600 px-2 py-0.5 rounded-full">
+              {video.platform}
+            </span>
+          </div>
+          
+          {isError && (
+            <div className="text-[10px] text-red-600 mb-2 flex justify-between items-center bg-red-50 p-1.5 rounded">
+              <span className="truncate mr-2" title={job.error}>{job.error || "Failed"}</span>
+              <button onClick={dismissError} className="hover:text-red-800 font-bold">×</button>
+            </div>
+          )}
+          
+          {isDownloading ? (
+            <div className="space-y-1.5 mt-auto">
+              <div className="flex justify-between items-center text-[10px] mb-1">
+                <span className="text-blue-600 font-medium truncate pr-2">{getPhaseText()}</span>
+                <span className="text-zinc-500 shrink-0">{job.progress.toFixed(0)}%</span>
+              </div>
+              <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-blue-500 transition-all duration-500 ease-out"
+                  style={{ width: `${job.progress}%` }}
+                />
+              </div>
+              <div className="flex justify-end pt-1">
+                <button onClick={cancelDownload} className="text-[10px] text-red-500 hover:text-red-700 font-medium px-2 py-1 hover:bg-red-50 rounded transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2 mt-auto">
+              <button 
+                onClick={startDownload}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download
+              </button>
+              <button 
+                onClick={() => setShowDeleteConfirm(true)}
+                className="p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
+                title="Delete Video"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              </button>
+            </div>
           )}
         </div>
-        
-        {error && <div className="text-xs text-red-600 mb-2">{error}</div>}
-        
-        {downloading ? (
-          <div className="space-y-2">
-            <div className="h-2 bg-zinc-200 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-blue-500 transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-zinc-500">{progress.toFixed(1)}%</span>
-              <button onClick={cancelDownload} className="text-red-500 hover:text-red-700">Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button 
-              onClick={startDownload}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-1.5 rounded transition-colors flex items-center justify-center gap-1"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Download
-            </button>
-            <button 
-              onClick={() => onDelete(video.id)}
-              className="p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 rounded transition-colors"
-              title="Delete Video"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-            </button>
-          </div>
-        )}
       </div>
-    </div>
+
+      {showDeleteConfirm && (
+        <ConformationMessagePopUp
+          title="Delete Video?"
+          message="Are you sure you want to delete this video? This cannot be undone."
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            onDelete(video.id);
+            setShowDeleteConfirm(false);
+          }}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+    </>
   );
 }

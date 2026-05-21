@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from "react";
 import VideoDataCard from "@/components/VideoDataCard";
 import ChatgptUrlCheckerPopUpCard from "@/components/ChatgptUrlCheckerPopUpCard";
+import FailedUrlShowPopUpCard from "@/components/FailedUrlShowPopUpCard";
 
 export default function FolderPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -13,6 +14,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPopup, setShowPopup] = useState(false);
+  const [showFailedPopup, setShowFailedPopup] = useState(false);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -74,13 +76,21 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
             {videos.length} {videos.length === 1 ? "Video" : "Videos"}
           </p>
         </div>
-        <button
-          onClick={() => setShowPopup(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-          Add Videos
-        </button>
+        <div className="flex items-center gap-3 shrink-0 w-full sm:w-auto">
+          <button
+            onClick={() => setShowFailedPopup(true)}
+            className="bg-white border border-red-200 hover:bg-red-50 text-red-600 font-medium py-2 px-4 rounded-lg text-sm transition-all flex items-center justify-center gap-2 w-full sm:w-auto"
+          >
+            <span className="text-base leading-none">⚠️</span> Failed URLs
+          </button>
+          <button
+            onClick={() => setShowPopup(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 w-full sm:w-auto"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            Add Videos
+          </button>
+        </div>
       </header>
 
       {/* Content */}
@@ -115,6 +125,13 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
           folderId={folderId}
           onClose={() => setShowPopup(false)}
           onSuccess={fetchVideos}
+        />
+      )}
+
+      {showFailedPopup && (
+        <FailedUrlShowPopUpCard
+          folderId={folderId}
+          onClose={() => setShowFailedPopup(false)}
         />
       )}
     </div>

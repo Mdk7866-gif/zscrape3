@@ -40,6 +40,16 @@ def delete_failed_url(failed_url_id: UUID):
         logger.error(f"Error deleting failed url: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete failed URL")
 
+@router.delete("/delete-all")
+def delete_all_failed_urls(folder_id: UUID):
+    """Delete all failed URLs for a specific folder."""
+    try:
+        response = supabase.table("failed_save_urls").delete().eq("folder_id", str(folder_id)).execute()
+        return {"success": True, "deleted": len(response.data)}
+    except Exception as e:
+        logger.error(f"Error deleting all failed urls for folder {folder_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete all failed URLs")
+
 @router.post("/save-bulk", response_model=SaveBulkFailedUrlsResponse)
 def save_bulk_failed_urls(request: SaveBulkFailedUrlsRequest):
     saved = 0
@@ -56,3 +66,4 @@ def save_bulk_failed_urls(request: SaveBulkFailedUrlsRequest):
             failed += 1
             
     return SaveBulkFailedUrlsResponse(success=True, saved=saved, failed=failed)
+
