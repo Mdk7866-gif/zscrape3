@@ -26,7 +26,12 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
     
     const lines = inputText.split("\n");
     if (lines.length > 100) {
-      setError("Please paste a maximum of 100 lines to avoid overwhelming the AI.");
+      setError(`Please paste a maximum of 100 lines. You pasted ${lines.length}/100 lines.`);
+      return;
+    }
+
+    if (inputText.length > 20000) {
+      setError(`Text is too long (${inputText.length}/20000 characters). Please paste a smaller batch.`);
       return;
     }
 
