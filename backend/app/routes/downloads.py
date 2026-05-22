@@ -122,7 +122,9 @@ def _download_sync(job: dict) -> None:
     job["status"] = "downloading"
     job["phase"] = "starting"
 
-    out_tmpl = os.path.join(tmp_dir, "%(title)s.%(ext)s")
+    db_title = job.get("db_title") or "video"
+    safe_title = _safe_filename(db_title)
+    out_tmpl = os.path.join(tmp_dir, f"{safe_title}.%(ext)s")
 
     # Track stream counts to weight progress correctly
     _stream_ctx = {"total_streams": 1, "current_stream": 0}
@@ -207,14 +209,20 @@ def _download_sync(job: dict) -> None:
             _delete_path(tmp_dir)
             return
 
-        raw_title = info.get("title") or "video"
         ext = os.path.splitext(file_path)[1] or ".mp4"
-        job["filename"] = _safe_filename(raw_title) + ext
+        job["filename"] = os.path.basename(file_path)
         job["file_path"] = file_path
         job["status"] = "completed"
         job["phase"] = "done"
         job["progress"] = 100
         job["updated_at"] = datetime.utcnow()
+
+        try:
+            actual_size = os.path.getsize(file_path)
+            supabase.table("videos").update({"file_size_bytes": actual_size}).eq("id", str(job["video_id"])).execute()
+        except Exception as e:
+            logger.warning(f"Could not update file_size_bytes for {job['video_id']}: {e}")
+
         logger.info(f"Download completed: {file_path}")
 
     except yt_dlp.utils.DownloadError as e:
@@ -258,10 +266,11 @@ def start_download(request: StartDownloadRequest):
             }
 
     try:
-        response = supabase.table("videos").select("url").eq("id", request.video_id).execute()
+        response = supabase.table("videos").select("url, title").eq("id", request.video_id).execute()
         if not response.data:
             raise HTTPException(status_code=404, detail="Video not found")
         video_url = response.data[0]["url"]
+        db_title = response.data[0]["title"]
     except HTTPException:
         raise
     except Exception as e:
@@ -274,6 +283,7 @@ def start_download(request: StartDownloadRequest):
         "job_id": job_id,
         "video_id": request.video_id,
         "url": video_url,
+        "db_title": db_title,
         "status": "queued",
         "phase": "starting",
         "progress": 0,

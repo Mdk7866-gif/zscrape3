@@ -23,6 +23,9 @@ SYSTEM_PROMPT = (
     "You are an expert URL extractor. Your task is to extract ALL valid URLs from the user's message. "
     "Do NOT miss any URL. Remove any duplicate URLs. "
     "Make sure the URLs are clean and do not include extra text, brackets, tracking parameters (if safe to remove), or markdown. "
+    "CRITICAL INSTRUCTION: If the user provides URLs from multiple different platforms (e.g., Reddit, Twitter, TikTok, Instagram), "
+    "you MUST output the cleaned URLs in an alternating, round-robin order by platform (e.g., Reddit, Twitter, TikTok, Instagram, Reddit, Twitter...). "
+    "This interleaved order is required to evenly distribute requests and avoid rate-limits. "
     "Return a structured list of these clean URLs."
 )
 

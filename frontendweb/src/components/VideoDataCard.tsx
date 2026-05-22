@@ -12,6 +12,23 @@ interface VideoData {
   duration_seconds: number;
   url: string;
   upload_date?: string;
+  file_size_bytes?: number;
+}
+
+function formatBytes(bytes?: number): string {
+  if (!bytes) return "Size: Unknown";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatUploadDate(dateStr?: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split("-");
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return dateStr;
 }
 
 export default function VideoDataCard({ video, onDelete }: { video: VideoData, onDelete: (id: string) => void }) {
@@ -123,16 +140,21 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
             {video.title}
           </h3>
 
-          {/* Platform badge + date */}
+          {/* Platform badge + date + size */}
           <div className="flex items-center justify-between mb-3">
             <span className={`uppercase tracking-wider font-semibold text-[9px] border px-2 py-0.5 rounded-full ${getPlatformColors(video.platform)}`}>
               {video.platform}
             </span>
-            {video.upload_date && (
-              <span className="text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
-                {video.upload_date}
+            <div className="flex gap-1.5 items-center">
+              <span className="text-[10px] text-zinc-500 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
+                {formatBytes(video.file_size_bytes)}
               </span>
-            )}
+              {video.upload_date && (
+                <span className="text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
+                  {formatUploadDate(video.upload_date)}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Bottom action area — always at bottom */}

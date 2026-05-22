@@ -18,6 +18,7 @@ class VideoOut(BaseModel):
     platform: str
     thumbnail: str | None = None
     upload_date: date | None = None
+    file_size_bytes: int | None = None
     created_at: datetime
     updated_at: datetime
 

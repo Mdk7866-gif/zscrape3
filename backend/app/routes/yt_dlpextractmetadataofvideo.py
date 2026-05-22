@@ -96,8 +96,8 @@ def extract_video_metadata(url: str) -> dict | None:
                 "platform": platform if platform != "unknown" else info_dict.get("extractor_key", "unknown").lower(),
                 "thumbnail": thumbnail,
                 "url": url,
-                # Original upload date from the platform (format: YYYYMMDD string or None)
                 "upload_date": _parse_upload_date(info_dict.get("upload_date")),
+                "file_size_bytes": info_dict.get("filesize") or info_dict.get("filesize_approx"),
             }
     except Exception as e:
         logger.error(f"Failed to extract metadata for {url}: {e}")

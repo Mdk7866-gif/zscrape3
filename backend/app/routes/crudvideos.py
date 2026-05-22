@@ -117,6 +117,7 @@ def bulk_upload_videos(request: BulkVideoUploadRequest):
                         "platform": metadata["platform"],
                         "thumbnail": metadata["thumbnail"],
                         "upload_date": metadata.get("upload_date") or date.today().isoformat(),
+                        "file_size_bytes": metadata.get("file_size_bytes"),
                     }
                     response = supabase.table("videos").insert(insert_data).execute()
 
