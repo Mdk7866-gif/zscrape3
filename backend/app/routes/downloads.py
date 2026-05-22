@@ -83,11 +83,14 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
         "concurrent_fragment_downloads": 4,  # faster fragment downloads
     }
 
-    if platform in ("twitter", "instagram", "facebook", "tiktok"):
-        # These platforms pre-merge video+audio. "best" gets the highest quality merged stream.
-        # We add [vcodec^=avc] preference but fall back to best (might be AV1 on Facebook).
-        # The remuxer will place it in mp4 container without re-encoding.
+    if platform in ("instagram", "facebook"):
+        # These platforms pre-merge video+audio. Prefer h264 mp4.
         base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[ext=mp4]/best"
+    elif platform == "tiktok":
+        # TikTok: MUST use merged streams - separate audio/video can lose audio.
+        # Use the pre-merged "best" stream first, fall back to explicit merge.
+        base["format"] = "best[ext=mp4]/bestvideo[vcodec^=avc][ext=mp4]+bestaudio/bestvideo+bestaudio/best"
+        base["extractor_args"] = {"tiktok": {"webpage_download": ["1"]}}
     elif platform == "reddit":
         # Reddit uses DASH — it always has separate video/audio streams. Pick h264 mp4.
         # No need for concurrent_fragment_downloads on Reddit (causes issues).

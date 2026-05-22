@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: mdk7866/zscrape3-backend:latest
+    container_name: zscrape3-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/downloads:/app/downloads
+    env_file:
+      - ./backend/.env
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontendweb
+      dockerfile: Dockerfile
+    image: mdk7866/zscrape3-frontend:latest
+    container_name: zscrape3-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: always
+
+networks:
+  default:
+    name: zscrape3-network

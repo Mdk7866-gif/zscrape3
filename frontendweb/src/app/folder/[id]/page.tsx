@@ -103,9 +103,30 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     return !job || (job.status !== "queued" && job.status !== "downloading" && job.status !== "completed");
   });
 
+  /** Sort videos in round-robin order by platform to spread requests across platforms */
+  function roundRobinByPlatform(items: any[]): any[] {
+    const groups: Record<string, any[]> = {};
+    for (const v of items) {
+      const p = v.platform || "other";
+      if (!groups[p]) groups[p] = [];
+      groups[p].push(v);
+    }
+    const queues = Object.values(groups);
+    const result: any[] = [];
+    let i = 0;
+    while (result.length < items.length) {
+      const q = queues[i % queues.length];
+      if (q && q.length > 0) result.push(q.shift());
+      i++;
+      if (queues.every((q) => q.length === 0)) break;
+    }
+    return result;
+  }
+
   const handleDownloadAllConfirmed = () => {
     setShowDownloadAllConfirm(false);
-    videosToDownload.forEach((v) => addToQueue(v.id));
+    const ordered = roundRobinByPlatform([...videosToDownload]);
+    ordered.forEach((v) => addToQueue(v.id));
   };
 
   // Compute active download count for this page
