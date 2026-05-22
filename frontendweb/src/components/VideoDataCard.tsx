@@ -147,7 +147,7 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
             </span>
             <div className="flex gap-1.5 items-center">
               <span className="text-[10px] text-zinc-500 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
-                {formatBytes(video.file_size_bytes)}
+                {formatBytes(job?.actualSize || video.file_size_bytes)}
               </span>
               {video.upload_date && (
                 <span className="text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">

@@ -219,6 +219,7 @@ def _download_sync(job: dict) -> None:
 
         try:
             actual_size = os.path.getsize(file_path)
+            job["actual_size"] = actual_size
             supabase.table("videos").update({"file_size_bytes": actual_size}).eq("id", str(job["video_id"])).execute()
         except Exception as e:
             logger.warning(f"Could not update file_size_bytes for {job['video_id']}: {e}")
@@ -321,6 +322,7 @@ def get_download_progress(job_id: str):
         "progress": job["progress"],
         "downloaded_bytes": job["downloaded_bytes"],
         "total_bytes": job["total_bytes"],
+        "actual_size": job.get("actual_size"),
         "eta": job["eta"],
         "speed": job["speed"],
         "error": job["error"],

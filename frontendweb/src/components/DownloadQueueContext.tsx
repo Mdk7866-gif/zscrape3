@@ -14,6 +14,7 @@ export interface DownloadJob {
   progress: number;
   phase: string;
   error?: string;
+  actualSize?: number;
 }
 
 interface DownloadQueueContextType {
@@ -216,6 +217,9 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
               progress: data.progress ?? current.progress,
               phase: data.phase || current.phase,
             };
+            if (data.actual_size) {
+              updates.actualSize = data.actual_size;
+            }
 
             if (data.status === "completed") {
               updates.status = "completed";
