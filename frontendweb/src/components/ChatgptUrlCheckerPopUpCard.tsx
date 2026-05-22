@@ -13,6 +13,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
   const [step, setStep] = useState<1 | 2>(1);
   const [inputText, setInputText] = useState("");
   const [extractedUrls, setExtractedUrls] = useState<string[]>([]);
+  const [remainingUrls, setRemainingUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("");
@@ -24,8 +25,8 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
     if (!inputText.trim()) return;
     
     const lines = inputText.split("\n");
-    if (lines.length > 150) {
-      setError("Please paste a maximum of 100-150 lines to avoid overwhelming the AI.");
+    if (lines.length > 100) {
+      setError("Please paste a maximum of 100 lines to avoid overwhelming the AI.");
       return;
     }
 
@@ -43,10 +44,18 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       if (!chatRes.ok) throw new Error("Failed to process URLs with ChatGPT");
       
       const chatData = await chatRes.json();
-      const urls: string[] = chatData.urls || [];
+      let urls: string[] = chatData.urls || [];
       
       if (urls.length === 0) {
         throw new Error("No valid URLs found in the text.");
+      }
+
+      if (urls.length > 50) {
+        setRemainingUrls(urls.slice(50));
+        urls = urls.slice(0, 50);
+        setError(`Extracted ${urls.length + remainingUrls.length} URLs, but you can only process 50 at a time. The first 50 are loaded below. Copy the remaining ones to use next!`);
+      } else {
+        setRemainingUrls([]);
       }
 
       setExtractedUrls(urls);
@@ -195,6 +204,19 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
                     ))}
                   </ul>
                 </div>
+                {remainingUrls.length > 0 && (
+                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
+                    <span className="text-sm text-amber-800 font-medium truncate pr-2">
+                      {remainingUrls.length} URLs remain unadded.
+                    </span>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(remainingUrls.join('\n'))}
+                      className="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded transition-colors shadow-sm"
+                    >
+                      Copy Remaining URLs
+                    </button>
+                  </div>
+                )}
               </>
             )}
 
@@ -207,7 +229,8 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
           
           <div className="p-4 border-t border-zinc-100 flex items-center justify-between bg-zinc-50/50">
             <div className="text-sm text-blue-600 font-medium truncate pr-4">
-              {statusText}
+              {/* Status text hidden during step 2 to prefer the button text */}
+              {step === 1 && statusText}
             </div>
             <div className="flex gap-3 shrink-0">
               <button
@@ -237,12 +260,12 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
                 <button
                   onClick={handleBulkUpload}
                   disabled={loading}
-                  className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:hover:bg-green-600 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-green-600/20 flex items-center gap-2"
+                  className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:hover:bg-green-600 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-green-600/20 flex items-center gap-2 min-w-[140px] justify-center"
                 >
                   {loading ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
-                      Saving...
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"/>
+                      {statusText || "Saving..."}
                     </>
                   ) : (
                     `Add ${extractedUrls.length} URLs`

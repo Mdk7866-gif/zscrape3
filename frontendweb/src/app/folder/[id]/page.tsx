@@ -147,22 +147,6 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {/* Save-to-folder picker */}
-            <button
-              onClick={pickDownloadDir}
-              title={downloadDir ? `Downloads going to: ${downloadDir}` : "Click to choose where to save downloaded videos"}
-              className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border transition-all max-w-[170px] ${
-                downloadDir
-                  ? "bg-green-50 border-green-300 text-green-700"
-                  : "bg-white border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600"
-              }`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-              </svg>
-              <span className="truncate">{downloadDir ? downloadDir : "Save Folder"}</span>
-            </button>
-
             <button
               onClick={() => setShowFailedPopup(true)}
               className="bg-white border border-red-200 hover:bg-red-50 text-red-600 font-medium py-2 px-3.5 rounded-lg text-sm transition-all flex items-center gap-2"

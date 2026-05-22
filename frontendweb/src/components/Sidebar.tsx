@@ -60,8 +60,9 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
     }
   };
 
-  const deleteFolder = async (id: string, name: string) => {
-    if (!confirm(`Delete folder "${name}"? All associated videos will also be deleted.`)) return;
+  const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const confirmDeleteFolder = async (id: string) => {
     try {
       setError(null);
       const res = await fetch(`${API_BASE}/folder/delete/${id}`, { method: "DELETE" });
@@ -159,7 +160,7 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
                         <span className="truncate">{folder.name}</span>
                       </Link>
                       <button
-                        onClick={() => deleteFolder(folder.id, folder.name)}
+                        onClick={() => setFolderToDelete({ id: folder.id, name: folder.name })}
                         className="shrink-0 mr-1 p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded opacity-100 transition-all focus:outline-none"
                         title="Delete Folder"
                       >
@@ -200,15 +201,31 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
       </aside>
 
       {/* Navigation guard confirmation */}
+      {/* Pending navigation confirmation */}
       {pendingHref && (
         <ConformationMessagePopUp
-          title="Downloads are active!"
+          title="Cancel active downloads?"
           message="You have videos downloading right now. Navigating away will cancel all active downloads. Are you sure you want to leave?"
           confirmLabel="Leave & Cancel Downloads"
           cancelLabel="Stay"
           danger
           onConfirm={confirmNavigation}
           onCancel={() => setPendingHref(null)}
+        />
+      )}
+
+      {/* Delete Folder confirmation */}
+      {folderToDelete && (
+        <ConformationMessagePopUp
+          title="Delete Folder?"
+          message={`Are you sure you want to delete "${folderToDelete.name}"? All associated videos will also be deleted.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            confirmDeleteFolder(folderToDelete.id);
+            setFolderToDelete(null);
+          }}
+          onCancel={() => setFolderToDelete(null)}
         />
       )}
     </>
