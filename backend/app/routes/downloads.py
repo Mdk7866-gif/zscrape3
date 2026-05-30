@@ -25,6 +25,10 @@ _USER_AGENT = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+# Resolve cookie path once at module load — avoids repeated filesystem calls per request
+_COOKIE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
+_HAS_COOKIES = os.path.exists(_COOKIE_PATH)
+
 # ── Global job store ──────────────────────────────────────────────────────────
 jobs: dict[str, dict] = {}
 
@@ -81,11 +85,11 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
         "file_access_retries": 3,
         "http_headers": {"User-Agent": _USER_AGENT},
         "concurrent_fragment_downloads": 4,  # faster fragment downloads
+        "geo_bypass": True,
     }
 
-    cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
-    if os.path.exists(cookie_path):
-        base["cookiefile"] = cookie_path
+    if _HAS_COOKIES:
+        base["cookiefile"] = _COOKIE_PATH
 
     if platform in ("instagram", "facebook"):
         # These platforms pre-merge video+audio. Prefer h264 mp4.
@@ -96,10 +100,10 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
         base["format"] = "best[ext=mp4]/bestvideo[vcodec^=avc][ext=mp4]+bestaudio/bestvideo+bestaudio/best"
         base["extractor_args"] = {"tiktok": {"webpage_download": ["1"]}}
     elif platform == "reddit":
-        # Reddit uses DASH — it always has separate video/audio streams. Pick h264 mp4.
-        # No need for concurrent_fragment_downloads on Reddit (causes issues).
-        base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio/bestvideo[ext=mp4]+bestaudio/best"
-        base["concurrent_fragment_downloads"] = 1
+        # Reddit uses DASH with auth — pick h264 mp4, fallback to best.
+        # Use 3 concurrent fragments; Reddit CDN handles it fine with cookies.
+        base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best"
+        base["concurrent_fragment_downloads"] = 3
     else:
         # YouTube, etc — strongly prefer h264 mp4 for max compatibility
         base["format"] = (

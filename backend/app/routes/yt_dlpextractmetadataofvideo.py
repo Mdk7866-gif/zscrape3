@@ -11,6 +11,10 @@ _USER_AGENT = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+# Resolve cookie path once at module load — avoids repeated filesystem calls per request
+_COOKIE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
+_HAS_COOKIES = os.path.exists(_COOKIE_PATH)
+
 def _get_platform(url: str) -> str:
     """Detect platform from URL."""
     url_lower = url.lower()
@@ -43,29 +47,29 @@ def extract_video_metadata(url: str) -> dict | None:
         "no_warnings": True,
         "noplaylist": True,
         "extract_flat": False,
-        "socket_timeout": 15,
+        "socket_timeout": 10,
         "retries": 1,
         "fragment_retries": 1,
         "file_access_retries": 1,
         "http_headers": {"User-Agent": _USER_AGENT},
+        "geo_bypass": True,
     }
 
-    cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
-    if os.path.exists(cookie_path):
-        base_opts["cookiefile"] = cookie_path
+    if _HAS_COOKIES:
+        base_opts["cookiefile"] = _COOKIE_PATH
 
-    # Twitter/X: only has merged streams, use "best"
+    # For metadata extraction we only need title/thumbnail/duration, NOT full format resolution.
+    # Using "best" avoids fetching/parsing DASH manifests which is the main source of slowness.
     if platform == "twitter":
         base_opts["format"] = "best"
 
-    # Instagram: similar, use "best"  
     elif platform == "instagram":
         base_opts["format"] = "best"
         base_opts["extractor_args"] = {"instagram": {"include_highlights": ["0"]}}
 
-    # Reddit: needs mp4 format
     elif platform == "reddit":
-        base_opts["format"] = "bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best"
+        # Use "best" here — avoids full DASH manifest parse (we only need metadata, not the exact stream)
+        base_opts["format"] = "best"
 
     # YouTube and others: standard high quality
     else:
