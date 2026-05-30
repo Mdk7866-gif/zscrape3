@@ -35,14 +35,14 @@ export default function ConformationMessagePopUp({
               {danger ? (
                 <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
                   <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
                   </svg>
                 </div>
               ) : (
                 <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
                   <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                   </svg>
                 </div>
               )}
@@ -62,11 +62,10 @@ export default function ConformationMessagePopUp({
           </button>
           <button
             onClick={() => { onConfirm(); }}
-            className={`px-5 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
-              danger
+            className={`px-5 py-2 text-sm font-medium text-white rounded-lg transition-colors ${danger
                 ? "bg-red-600 hover:bg-red-700"
                 : "bg-blue-600 hover:bg-blue-700"
-            }`}
+              }`}
           >
             {confirmLabel}
           </button>
