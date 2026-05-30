@@ -166,7 +166,10 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
                 <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
                 <span className="text-xs text-green-700 font-medium flex-1">Downloaded!</span>
                 <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline mr-1">Re-download</button>
-                <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs">✕</button>
+                <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs mr-1">✕</button>
+                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
               </div>
             )}
 
@@ -179,7 +182,10 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
                   <p className="text-[10px] text-red-500 truncate" title={job.error}>{job.error || "Unknown error"}</p>
                 </div>
                 <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline shrink-0 mr-1">Retry</button>
-                <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs shrink-0">✕</button>
+                <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs shrink-0 mr-1">✕</button>
+                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 shrink-0 transition-colors" title="Delete card">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
               </div>
             )}
 
@@ -187,7 +193,10 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
             {isCancelled && (
               <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2">
                 <span className="text-xs text-zinc-500 flex-1">Cancelled</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-xs text-blue-600 hover:underline font-medium">Retry</button>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-xs text-blue-600 hover:underline font-medium mr-1">Retry</button>
+                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
               </div>
             )}
 
@@ -196,7 +205,10 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
               <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                 <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
                 <span className="text-xs text-green-700 font-medium flex-1">Already Downloaded</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline">Re-download</button>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline mr-1">Re-download</button>
+                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
               </div>
             )}
 
@@ -205,7 +217,10 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
               <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                 <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                 <span className="text-xs text-red-700 font-medium flex-1">Previously Failed</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline">Retry</button>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline mr-1">Retry</button>
+                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
               </div>
             )}
 
@@ -213,7 +228,10 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
             {persistedCancelled && (
               <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2">
                 <span className="text-xs text-zinc-500 flex-1">Previously Cancelled</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline font-medium">Download</button>
+                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline font-medium mr-1">Download</button>
+                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
               </div>
             )}
 

@@ -42,6 +42,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   const [showFailedPopup, setShowFailedPopup] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showDownloadAllConfirm, setShowDownloadAllConfirm] = useState(false);
+  const [urlsCopied, setUrlsCopied] = useState(false);
   const [page, setPage] = useState(1);
 
   const { addToQueue, jobs, hasActiveDownloads, loadFolderStatuses, downloadDir, pickDownloadDir, cancelAllJobs } = useDownloadQueue();
@@ -90,6 +91,26 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       fetchVideos();
     } catch {
       console.error("Failed to delete video");
+    }
+  };
+
+  const handleCopyUrls = async () => {
+    if (videos.length === 0) return;
+    const urlText = paginatedVideos.map((v) => v.url).join("\n");
+    try {
+      await navigator.clipboard.writeText(urlText);
+      setUrlsCopied(true);
+      setTimeout(() => setUrlsCopied(false), 2000);
+    } catch {
+      // Fallback for browsers that block clipboard
+      const el = document.createElement("textarea");
+      el.value = urlText;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+      setUrlsCopied(true);
+      setTimeout(() => setUrlsCopied(false), 2000);
     }
   };
 
@@ -173,6 +194,37 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
               className="bg-white border border-red-200 hover:bg-red-50 text-red-600 font-medium py-2 px-3.5 rounded-lg text-sm transition-all flex items-center gap-2"
             >
               <span className="text-base leading-none">⚠️</span> Failed URLs
+            </button>
+
+            {/* Copy URLs */}
+            <button
+              onClick={handleCopyUrls}
+              disabled={videos.length === 0}
+              title={videos.length === 0 ? "No videos to copy" : `Copy ${paginatedVideos.length} URL(s) to clipboard`}
+              className={`flex items-center gap-2 font-medium py-2 px-3.5 rounded-lg text-sm transition-all border ${
+                videos.length === 0
+                  ? "bg-zinc-50 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-60"
+                  : urlsCopied
+                  ? "bg-green-50 border-green-300 text-green-700"
+                  : "bg-white border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 text-zinc-700"
+              }`}
+            >
+              {urlsCopied ? (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  Copy URLs
+                </>
+              )}
             </button>
 
             {/* Download All / Cancel All */}
