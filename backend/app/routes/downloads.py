@@ -83,6 +83,10 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
         "concurrent_fragment_downloads": 4,  # faster fragment downloads
     }
 
+    cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
+    if os.path.exists(cookie_path):
+        base["cookiefile"] = cookie_path
+
     if platform in ("instagram", "facebook"):
         # These platforms pre-merge video+audio. Prefer h264 mp4.
         base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[ext=mp4]/best"

@@ -1,5 +1,6 @@
 import yt_dlp
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,10 @@ def extract_video_metadata(url: str) -> dict | None:
         "file_access_retries": 1,
         "http_headers": {"User-Agent": _USER_AGENT},
     }
+
+    cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
+    if os.path.exists(cookie_path):
+        base_opts["cookiefile"] = cookie_path
 
     # Twitter/X: only has merged streams, use "best"
     if platform == "twitter":
