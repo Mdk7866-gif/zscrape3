@@ -88,8 +88,6 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
         "geo_bypass": True,
     }
 
-    if _HAS_COOKIES:
-        base["cookiefile"] = _COOKIE_PATH
 
     if platform in ("instagram", "facebook"):
         # These platforms pre-merge video+audio. Prefer h264 mp4.
@@ -104,6 +102,8 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
         # Use 3 concurrent fragments; Reddit CDN handles it fine with cookies.
         base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best"
         base["concurrent_fragment_downloads"] = 3
+        if _HAS_COOKIES:
+            base["cookiefile"] = _COOKIE_PATH
     else:
         # YouTube, etc — strongly prefer h264 mp4 for max compatibility
         base["format"] = (

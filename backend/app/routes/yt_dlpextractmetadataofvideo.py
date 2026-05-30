@@ -55,24 +55,28 @@ def extract_video_metadata(url: str) -> dict | None:
         "geo_bypass": True,
     }
 
-    if _HAS_COOKIES:
-        base_opts["cookiefile"] = _COOKIE_PATH
 
-    # For metadata extraction we only need title/thumbnail/duration, NOT full format resolution.
-    # Using "best" avoids fetching/parsing DASH manifests which is the main source of slowness.
-    if platform == "twitter":
-        base_opts["format"] = "best"
-
-    elif platform == "instagram":
+    # Temporarily override: only pass cookies for Reddit
+    # DO NOT set a format for Reddit — Reddit uses DASH (separate video+audio streams).
+    # format="best" fails for DASH-only posts because there is no pre-merged stream.
+    # Leaving format unset lets yt-dlp use its own smart default, which handles DASH correctly.
+    if platform == "instagram":
         base_opts["format"] = "best"
         base_opts["extractor_args"] = {"instagram": {"include_highlights": ["0"]}}
 
     elif platform == "reddit":
-        # Use "best" here — avoids full DASH manifest parse (we only need metadata, not the exact stream)
+        # No format restriction — yt-dlp default handles Reddit DASH without failing.
+        # This is the only safe option: "best" errors on DASH-only posts (no pre-merged stream).
+        # Only Reddit needs the cookie file for auth.
+        if _HAS_COOKIES:
+            base_opts["cookiefile"] = _COOKIE_PATH
+
+    elif platform == "twitter":
+        # Twitter/X has merged streams, "best" is fine
         base_opts["format"] = "best"
 
-    # YouTube and others: standard high quality
     else:
+        # YouTube and others: standard high quality
         base_opts["format"] = (
             "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]"
             "/bestvideo[ext=mp4]+bestaudio[ext=m4a]"
