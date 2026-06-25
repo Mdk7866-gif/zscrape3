@@ -20,13 +20,12 @@ class AgentState(TypedDict):
 # ── Node Definitions ─────────────────────────────────────────────────────────-
 
 SYSTEM_PROMPT = (
-    "You are an expert URL extractor. Your task is to extract ALL valid URLs from the user's message. "
-    "Do NOT miss any URL. Remove any duplicate URLs. "
-    "Make sure the URLs are clean and do not include extra text, brackets, tracking parameters (if safe to remove), or markdown. "
-    "CRITICAL INSTRUCTION: If the user provides URLs from multiple different platforms (e.g., Reddit, Twitter, TikTok, Instagram), "
-    "you MUST output the cleaned URLs in an alternating, round-robin order by platform (e.g., Reddit, Twitter, TikTok, Instagram, Reddit, Twitter...). "
-    "This interleaved order is required to evenly distribute requests and avoid rate-limits. "
-    "Return a structured list of these clean URLs."
+    "You are an expert URL extractor. Your task is to extract ALL URLs from the user's input, including both valid and invalid/broken URLs. "
+    "Do NOT ignore, filter out, or eliminate any URL, even if it has typos, is invalid, is from an unknown platform, or is formatted incorrectly. "
+    "If the input contains URLs that are stuck together (e.g., without spaces), separated by commas, or embedded in comments/text, you must extract each individual URL. "
+    "Clean each URL by removing surrounding quotes, brackets, parentheses, trailing punctuation (like commas or periods), tracking parameters (such as si, igsh, fbclid, etc., if safe to remove), or markdown syntax. "
+    "Do NOT remove or filter out any URL under any circumstances. "
+    "Return a structured list of these URLs."
 )
 
 def call_model(state: AgentState, config: RunnableConfig = None):
@@ -88,13 +87,55 @@ async def chat_query(
     
     # Parse the JSON string back into a list and remove duplicates
     import json
+    import urllib.parse
+    from collections import defaultdict
     try:
         data = json.loads(raw_content)
         extracted_urls = data.get("urls", [])
     except json.JSONDecodeError:
         extracted_urls = []
         
-    # Remove any potential duplicates and ensure they look like URLs
-    clean_urls = list(dict.fromkeys([u.strip() for u in extracted_urls if u.strip().startswith("http")]))
+    # Clean the extracted URLs (keeping non-empty strings)
+    cleaned = [u.strip() for u in extracted_urls if u.strip()]
     
-    return ChatResponse(urls=clean_urls)
+    # Deduplicate while preserving insertion order
+    unique_urls = list(dict.fromkeys(cleaned))
+    
+    # Group URLs by platform for round-robin interleaving
+    def get_platform_key(url: str) -> str:
+        url_lower = url.lower()
+        if "twitter.com" in url_lower or "x.com" in url_lower:
+            return "twitter"
+        if "instagram.com" in url_lower:
+            return "instagram"
+        if "reddit.com" in url_lower or "redd.it" in url_lower:
+            return "reddit"
+        if "youtube.com" in url_lower or "youtu.be" in url_lower:
+            return "youtube"
+        if "tiktok.com" in url_lower:
+            return "tiktok"
+        if "facebook.com" in url_lower or "fb.watch" in url_lower:
+            return "facebook"
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.netloc:
+                return parsed.netloc.lower()
+        except Exception:
+            pass
+        return "other"
+
+    groups = defaultdict(list)
+    for url in unique_urls:
+        platform = get_platform_key(url)
+        groups[platform].append(url)
+        
+    # Interleave URLs using round-robin by platform
+    platforms = list(groups.keys())
+    interleaved_urls = []
+    max_len = max((len(lst) for lst in groups.values()), default=0)
+    for i in range(max_len):
+        for p in platforms:
+            if i < len(groups[p]):
+                interleaved_urls.append(groups[p][i])
+                
+    return ChatResponse(urls=interleaved_urls)

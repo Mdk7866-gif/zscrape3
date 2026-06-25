@@ -1,6 +1,8 @@
 import yt_dlp
 import logging
 import os
+import urllib.request
+import urllib.error
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,30 @@ def _get_platform(url: str) -> str:
     return "unknown"
 
 
+def _resolve_reddit_share_url(url: str) -> str:
+    """
+    Reddit share links (e.g. /r/Sub/s/XXXXXXX) are redirects to the real post.
+    Follow the redirect chain and return the final destination URL.
+    If resolution fails, return the original URL unchanged.
+    """
+    if "/s/" not in url:
+        return url  # Not a share link, skip
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": _USER_AGENT},
+            method="HEAD",
+        )
+        # Don't auto-follow so we can log each hop; actually we DO want to follow
+        with urllib.request.urlopen(req, timeout=10) as response:
+            resolved = response.url
+        logger.info(f"Resolved Reddit share URL {url!r} -> {resolved!r}")
+        return resolved
+    except Exception as e:
+        logger.warning(f"Could not resolve Reddit share URL {url!r}: {e}. Using original.")
+        return url
+
+
 def extract_video_metadata(url: str) -> dict | None:
     """
     Extracts metadata from a video URL using yt-dlp.
@@ -40,6 +66,10 @@ def extract_video_metadata(url: str) -> dict | None:
     Returns dict with title, duration_seconds, platform, thumbnail, url.
     """
     platform = _get_platform(url)
+
+    # Reddit share links (/s/XXXXX) are redirects — resolve to the real post URL first
+    if platform == "reddit":
+        url = _resolve_reddit_share_url(url)
 
     # Platform-specific options
     base_opts = {
