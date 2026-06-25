@@ -54,16 +54,34 @@ def delete_all_failed_urls(folder_id: UUID):
 def save_bulk_failed_urls(request: SaveBulkFailedUrlsRequest):
     saved = 0
     failed = 0
+
+    # Fetch all URLs already recorded as failed for this folder in one query
+    try:
+        existing_res = supabase.table("failed_save_urls") \
+            .select("url") \
+            .eq("folder_id", str(request.folder_id)) \
+            .execute()
+        existing_urls = {row["url"] for row in (existing_res.data or [])}
+    except Exception as e:
+        logger.error(f"Error fetching existing failed urls for folder {request.folder_id}: {e}")
+        existing_urls = set()
+
     for url in request.urls:
+        clean_url = url.strip()
+        # Skip if this URL is already in the failed list for this folder
+        if clean_url in existing_urls:
+            logger.info(f"Skipping duplicate failed URL: {clean_url}")
+            continue
         try:
             supabase.table("failed_save_urls").insert({
                 "folder_id": str(request.folder_id),
-                "url": url.strip()
+                "url": clean_url
             }).execute()
+            existing_urls.add(clean_url)  # Track in-memory to catch dupes within the same batch
             saved += 1
         except Exception as e:
             logger.error(f"Error saving failed url {url}: {e}")
             failed += 1
-            
+
     return SaveBulkFailedUrlsResponse(success=True, saved=saved, failed=failed)
 
