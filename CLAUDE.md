@@ -1,0 +1,79 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project overview
+
+zscrape3 is a video cataloging/downloading tool: users paste messy text containing links, an LLM (GPT-4o via LangGraph) extracts URLs, yt-dlp pulls metadata (and later the actual video) for each, and results are organized into folders backed by Supabase (Postgres). It's a two-service app — `backend` (FastAPI) and `frontendweb` (Next.js) — normally run together via `docker-compose.yml`.
+
+## Commands
+
+### Backend (`backend/`, Python 3.13, managed with `uv`)
+
+```
+uv sync                 # install deps (see pyproject.toml)
+uv run dev              # runs app.main:start -> uvicorn with reload, port 8000
+# or directly:
+uv run uvicorn app.main:app --reload --port 8000
+
+uv run ruff check .     # lint
+uv run mypy .           # type check
+```
+
+There is no test suite in this repo currently.
+
+Backend needs a `backend/.env` (see `backend/env.example` for the required keys: Supabase URL/secret key, OpenAI key/model, allowed CORS origins, downloads dir, max bulk URLs). `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are required with no default (app fails to start without them).
+
+### Frontend (`frontendweb/`, Next.js 16 / React 19)
+
+```
+npm run dev       # next dev, http://localhost:3000
+npm run build
+npm run start
+npm run lint       # eslint
+```
+
+Frontend talks to the backend via `NEXT_PUBLIC_API_URL` (defaults to `http://127.0.0.1:8000` when unset).
+
+**Important:** `frontendweb/AGENTS.md` (auto-loaded) warns that this Next.js version has breaking API/convention changes from what's in your training data — check `node_modules/next/dist/docs/` before writing Next.js code that relies on assumed conventions.
+
+### Docker
+
+`docker-compose.yml` at the repo root builds/runs both services (backend on 8000, frontend on 3000, sharing `zscrape3-network`). Backend mounts `./backend/downloads` and reads `./backend/.env`.
+
+## Architecture
+
+### Data model (Supabase/Postgres — see `backend/zscrape3database.dbml` and `zscrape3_database.sql`)
+
+- `folders` — top-level organizational unit (unique `name`).
+- `videos` — belongs to a folder (`folder_id`), unique on `(folder_id, url)`. Stores extracted metadata: title, duration, platform, thumbnail, upload_date, file_size_bytes.
+- `failed_save_urls` — URLs that failed metadata extraction during bulk upload, per folder, so users can retry/inspect them.
+- `video_download_status` — one row per video (unique `video_id`), enum status `fresh|pending|downloaded|cancelled|failed`. A video with no row is implicitly `fresh`.
+
+The backend talks to Supabase directly via the `supabase-py` client (`app/supabase.py`), using the **service role/secret key** — there is no ORM/migrations layer in this repo; schema changes are applied to Supabase out of band and should be reflected back into the `.dbml`/`.sql` files.
+
+### Backend request flow (`backend/app/`)
+
+- `main.py` — FastAPI app, CORS from `settings.allowed_origins_list`, mounts `api_router`.
+- `routes/router.py` — combines all route modules; each module owns one URL prefix/domain: `chatgpturlchecker` (`/chatgpturlchecker`), `downloads` (`/download`), `failed_urls` (`/failed-urls`), `crudfolders` (`/folder`), `crudvideos` (`/video`), `proxy` (`/proxy`), `video_download_status` (`/video-status`).
+- `routes/chatgpturlchecker.py` — a minimal LangGraph single-node graph that calls `gpt-4o` with structured output to pull every URL (valid or not) out of pasted text, dedupes, then round-robin interleaves results by platform so the bulk-upload queue processes different platforms in parallel rather than one platform at a time.
+- `routes/yt_dlpextractmetadataofvideo.py` — shared yt-dlp metadata extraction (`extract_video_metadata`), not itself a route; per-platform yt-dlp `format`/option tuning (Instagram, Reddit, Twitter/X, YouTube-and-other). Reddit share links (`/s/...`) get resolved via a manual redirect follow before extraction. Uses `backend/cookies.txt` (if present) for Reddit auth.
+- `routes/crudvideos.py` (`/video/bulk-upload`) — accepts a list of URLs, extracts metadata **concurrently** (`ThreadPoolExecutor`, 5 workers) via the above helper, and streams NDJSON progress lines back to the client as each URL resolves (saved/duplicate/failed), inserting into `videos` + `video_download_status` (defaulting to `fresh`) and `failed_save_urls` on failure.
+- `routes/downloads.py` (`/download/*`) — actual file downloads. Runs a blocking yt-dlp download in a background thread per job, tracked in an **in-process `jobs` dict** (no persistence — job state is lost on server restart). Per-platform `format`/postprocessor tuning again lives here (kept in sync conceptually with `yt_dlpextractmetadataofvideo.py`'s platform detection, but duplicated, not shared). Key invariant called out in comments: always use `FFmpegVideoRemuxer`, never `FFmpegVideoConvertor` (avoid re-encoding). Progress is polled (`GET /download/progress/{job_id}`), and `GET /download/file/{job_id}` streams the finished file then deletes the temp dir via a `BackgroundTask`.
+- `routes/video_download_status.py` (`/video-status/*`) — persists the per-video status shown above so download progress survives page reloads/navigation.
+- `routes/proxy.py` (`/proxy/image`) — proxies thumbnail images for domains that block hotlinking (Instagram/Facebook CDN); redirects straight through for anything not on the allowlist.
+- `schemas/*.py` — Pydantic request/response models per domain, imported by the matching route module.
+
+### Frontend structure (`frontendweb/src/`)
+
+- App Router pages: `app/page.tsx` (landing), `app/folder/[id]/page.tsx` (per-folder video list/management).
+- `components/DownloadQueueContext.tsx` — the core client-side download orchestrator, provided app-wide. Maintains an in-memory job queue (`jobs`) separate from persisted DB statuses (`dbStatuses`), runs **one download at a time** (queue runner effect gates on `activeCount === 0`), polls `/download/progress/{job_id}` every 500ms while a job is downloading, and on completion either writes the file via the File System Access API (if the user picked a directory with `pickDownloadDir`) or falls back to a plain `<a download>` click. Every state transition (`pending`/`downloaded`/`cancelled`/`failed`) is synced back to the backend's `video-status` endpoints so progress survives reloads.
+- `components/VideoDataCard.tsx`, `FailedUrlShowPopUpCard.tsx`, `ChatgptUrlCheckerPopUpCard.tsx` — video list items, failed-URL review UI, and the paste-text-and-extract-URLs flow, respectively (each pairs with a backend route of the same concern above).
+- `components/Sidebar.tsx`, `Navbar.tsx`, `Footer.tsx` — layout chrome; folder list/navigation lives in the sidebar.
+- `components/AlertMessagePopUp.tsx`, `ConformationMessagePopUp.tsx` — shared alert/confirm modal primitives used across the CRUD flows.
+
+### Cross-cutting notes
+
+- Platform detection (twitter/x, instagram, facebook, reddit, tiktok, youtube-or-other) is reimplemented independently in at least three places (`chatgpturlchecker.py`, `yt_dlpextractmetadataofvideo.py`, `downloads.py`) with slightly different platform sets — when changing platform behavior, check all three.
+- Download job state (`downloads.py`'s `jobs` dict) is purely in-memory; restarting the backend orphans any in-flight downloads (frontend will see 404s on progress polling and mark them cancelled).
+- Bulk operations (`bulk-upload`) are the main perf-sensitive path — metadata extraction is deliberately parallelized (5 workers) and results stream back as NDJSON rather than waiting for the whole batch.
