@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from app.supabase import supabase
+from app.admin_auth import AdminFlag, assert_folder_visible
 from app.schemas.failed_url import FailedUrlOut, FailedUrlDeleteResponse
 
 router = APIRouter(prefix="/failed-urls", tags=["failed-urls"])
@@ -19,7 +20,8 @@ class SaveBulkFailedUrlsResponse(BaseModel):
     failed: int
 
 @router.get("/fetchall", response_model=list[FailedUrlOut])
-def fetch_all_failed_urls(folder_id: UUID):
+def fetch_all_failed_urls(folder_id: UUID, admin: AdminFlag):
+    assert_folder_visible(folder_id, admin)
     try:
         response = supabase.table("failed_save_urls").select("*").eq("folder_id", str(folder_id)).order("created_at", desc=True).execute()
         return response.data
@@ -28,7 +30,18 @@ def fetch_all_failed_urls(folder_id: UUID):
         raise HTTPException(status_code=500, detail="Failed to fetch failed URLs")
 
 @router.delete("/delete/{failed_url_id}", response_model=FailedUrlDeleteResponse)
-def delete_failed_url(failed_url_id: UUID):
+def delete_failed_url(failed_url_id: UUID, admin: AdminFlag):
+    # Resolve the owning folder first so an admin row can't be deleted by ID alone.
+    owner = (
+        supabase.table("failed_save_urls")
+        .select("folder_id")
+        .eq("id", str(failed_url_id))
+        .execute()
+    )
+    if not owner.data:
+        raise HTTPException(status_code=404, detail="Failed URL not found")
+    assert_folder_visible(owner.data[0]["folder_id"], admin, label="Failed URL")
+
     try:
         response = supabase.table("failed_save_urls").delete().eq("id", str(failed_url_id)).execute()
         if len(response.data) == 0:
@@ -41,8 +54,9 @@ def delete_failed_url(failed_url_id: UUID):
         raise HTTPException(status_code=500, detail="Failed to delete failed URL")
 
 @router.delete("/delete-all")
-def delete_all_failed_urls(folder_id: UUID):
+def delete_all_failed_urls(folder_id: UUID, admin: AdminFlag):
     """Delete all failed URLs for a specific folder."""
+    assert_folder_visible(folder_id, admin)
     try:
         response = supabase.table("failed_save_urls").delete().eq("folder_id", str(folder_id)).execute()
         return {"success": True, "deleted": len(response.data)}
@@ -51,7 +65,8 @@ def delete_all_failed_urls(folder_id: UUID):
         raise HTTPException(status_code=500, detail="Failed to delete all failed URLs")
 
 @router.post("/save-bulk", response_model=SaveBulkFailedUrlsResponse)
-def save_bulk_failed_urls(request: SaveBulkFailedUrlsRequest):
+def save_bulk_failed_urls(request: SaveBulkFailedUrlsRequest, admin: AdminFlag):
+    assert_folder_visible(request.folder_id, admin)
     saved = 0
     failed = 0
 

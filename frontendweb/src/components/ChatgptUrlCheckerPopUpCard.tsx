@@ -2,6 +2,7 @@
 
 import { useState, ReactNode } from "react";
 import AlertMessagePopUp from "@/components/AlertMessagePopUp";
+import { apiFetch } from "@/lib/api";
 
 interface ChatgptUrlCheckerPopUpCardProps {
   folderId: string;
@@ -18,8 +19,6 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("");
   const [alert, setAlert] = useState<{ title: string; message: string | ReactNode; type?: "success" | "error" | "warning" | "info" } | null>(null);
-
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   const handleExtract = async () => {
     if (!inputText.trim()) return;
@@ -40,7 +39,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       setError(null);
       setStatusText("Extracting clean URLs with AI...");
       
-      const chatRes = await fetch(`${API_BASE}/chatgpturlchecker/`, {
+      const chatRes = await apiFetch("/chatgpturlchecker/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: inputText }),
@@ -81,7 +80,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       setError(null);
       setStatusText(`Starting upload...`);
       
-      const bulkRes = await fetch(`${API_BASE}/video/bulk-upload`, {
+      const bulkRes = await apiFetch("/video/bulk-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folder_id: folderId, urls: extractedUrls }),

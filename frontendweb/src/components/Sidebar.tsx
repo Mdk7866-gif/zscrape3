@@ -4,7 +4,9 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useDownloadQueue } from "@/components/DownloadQueueContext";
+import { useAdmin } from "@/components/AdminContext";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
+import { apiFetch } from "@/lib/api";
 
 interface Folder {
   id: string;
@@ -22,12 +24,12 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const router = useRouter();
 
   const { hasActiveDownloads } = useDownloadQueue();
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const { isAdmin, checking } = useAdmin();
 
   const fetchFolders = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/folder/fetchall`);
+      const res = await apiFetch("/folder/fetchall");
       if (!res.ok) throw new Error("Failed to fetch folders");
       const data = await res.json();
       setFolders(data);
@@ -44,7 +46,7 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
     if (!newFolderName.trim()) return;
     try {
       setError(null);
-      const res = await fetch(`${API_BASE}/folder/create`, {
+      const res = await apiFetch("/folder/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newFolderName }),
@@ -65,7 +67,7 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const confirmDeleteFolder = async (id: string) => {
     try {
       setError(null);
-      const res = await fetch(`${API_BASE}/folder/delete/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/folder/delete/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete folder");
       fetchFolders();
     } catch (err: any) {
@@ -73,9 +75,13 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
     }
   };
 
+  // Refetch when the workspace changes (admin login/logout swaps which folders
+  // exist). Waits for `checking` so the first load doesn't fire before a stored
+  // token has been validated, which would fetch the public list then replace it.
   useEffect(() => {
+    if (checking) return;
     fetchFolders();
-  }, []);
+  }, [isAdmin, checking]);
 
   // Guard: intercept navigation while downloads are active
   const handleNavClick = (e: React.MouseEvent, href: string) => {
@@ -99,7 +105,10 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
       <aside className="w-full h-full bg-zinc-50 text-zinc-900 border-r border-zinc-200 flex flex-col">
         {/* Header */}
         <div className="p-4 border-b border-zinc-200 flex items-center justify-between shrink-0">
-          <h2 className="font-bold text-xs text-zinc-500 uppercase tracking-widest">Folders</h2>
+          <h2 className="font-bold text-xs text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+            {isAdmin && <span className="text-[11px]">🔒</span>}
+            {isAdmin ? "Admin Folders" : "Folders"}
+          </h2>
           <div className="flex items-center gap-2">
             {loading && (
               <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -142,7 +151,9 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
           )}
 
           {folders.length === 0 && !loading ? (
-            <div className="text-xs text-zinc-400 italic px-4 py-3">No folders yet.</div>
+            <div className="text-xs text-zinc-400 italic px-4 py-3">
+              {isAdmin ? "No admin folders yet." : "No folders yet."}
+            </div>
           ) : (
             <ul className="space-y-0.5 px-2">
               {folders.map((folder) => {

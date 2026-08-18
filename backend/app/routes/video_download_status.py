@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.supabase import supabase
+from app.admin_auth import AdminFlag, assert_folder_visible, assert_video_visible
 
 router = APIRouter(prefix="/video-status", tags=["video-download-status"])
 logger = logging.getLogger(__name__)
@@ -18,11 +19,12 @@ class UpdateStatusRequest(BaseModel):
 
 
 @router.get("/folder/{folder_id}")
-def get_folder_statuses(folder_id: UUID):
+def get_folder_statuses(folder_id: UUID, admin: AdminFlag):
     """
     Returns a dict of {video_id: status} for all videos in a folder
     that have a download status record. Videos not in the table are implicitly 'fresh'.
     """
+    assert_folder_visible(folder_id, admin)
     try:
         response = (
             supabase.table("video_download_status")
@@ -37,8 +39,9 @@ def get_folder_statuses(folder_id: UUID):
 
 
 @router.post("/update")
-def update_status(request: UpdateStatusRequest):
+def update_status(request: UpdateStatusRequest, admin: AdminFlag):
     """Upsert download status for a video. Creates or updates the row."""
+    assert_video_visible(request.video_id, admin)
     try:
         supabase.table("video_download_status").upsert(
             {"video_id": request.video_id, "status": request.status},
@@ -51,8 +54,9 @@ def update_status(request: UpdateStatusRequest):
 
 
 @router.get("/{video_id}")
-def get_status(video_id: UUID):
+def get_status(video_id: UUID, admin: AdminFlag):
     """Get download status for a single video. Returns 'fresh' if no record exists."""
+    assert_video_visible(video_id, admin)
     try:
         response = (
             supabase.table("video_download_status")

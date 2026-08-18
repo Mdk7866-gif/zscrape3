@@ -6,6 +6,8 @@ import ChatgptUrlCheckerPopUpCard from "@/components/ChatgptUrlCheckerPopUpCard"
 import FailedUrlShowPopUpCard from "@/components/FailedUrlShowPopUpCard";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
 import { useDownloadQueue } from "@/components/DownloadQueueContext";
+import { useAdmin } from "@/components/AdminContext";
+import { apiFetch } from "@/lib/api";
 
 const PAGE_SIZE = 50;
 
@@ -46,13 +48,16 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   const [page, setPage] = useState(1);
 
   const { addToQueue, jobs, hasActiveDownloads, loadFolderStatuses, downloadDir, pickDownloadDir, cancelAllJobs } = useDownloadQueue();
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const { isAdmin, checking } = useAdmin();
 
   const fetchVideos = async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API_BASE}/video/fetchall?folder_id=${folderId}`);
+      const res = await apiFetch(`/video/fetchall?folder_id=${folderId}`);
+      // 404 here means this folder isn't visible in the current workspace —
+      // e.g. an admin folder after exiting admin mode, or a stale/guessed URL.
+      if (res.status === 404) throw new Error("This folder is not available.");
       if (!res.ok) throw new Error("Failed to fetch videos");
       const data = await res.json();
       setVideos(data);
@@ -65,7 +70,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
 
   const fetchFolderInfo = async () => {
     try {
-      const res = await fetch(`${API_BASE}/folder/fetchall`);
+      const res = await apiFetch("/folder/fetchall");
       if (!res.ok) return;
       const data = await res.json();
       const folder = data.find((f: any) => f.id === folderId);
@@ -76,16 +81,20 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     } catch {}
   };
 
+  // Also re-runs when the workspace changes, so exiting admin mode on an admin
+  // folder page immediately surfaces the "not available" state instead of
+  // leaving the previous workspace's videos on screen.
   useEffect(() => {
+    if (checking) return;
     setPage(1);
     fetchVideos();
     fetchFolderInfo();
     loadFolderStatuses(folderId);
-  }, [folderId]);
+  }, [folderId, isAdmin, checking]);
 
   const handleDelete = async (videoId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/video/delete/${videoId}`, { method: "DELETE" });
+      const res = await apiFetch(`/video/delete/${videoId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete video");
       setShowDeleteConfirm(null);
       fetchVideos();

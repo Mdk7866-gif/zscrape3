@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import List
 from app.schemas.folder import FolderCreate, FolderOut, FolderDeleteResponse
 from app.supabase import supabase
+from app.admin_auth import AdminFlag, assert_folder_visible
 from postgrest.exceptions import APIError
 
 router = APIRouter(
@@ -10,10 +11,16 @@ router = APIRouter(
     tags=["/foldercreate means create new folder entry in folder table of database, /folderdelete means delete the folder from that table also delete all the entries in videos and failed_save_urls table which have  folder_id as foreign key, /folderfetch  means fetch all the folders name from folder table which has this folder name "]
 )
 
+
 @router.post("/create", response_model=FolderOut, status_code=status.HTTP_201_CREATED)
-def create_folder(folder: FolderCreate):
+def create_folder(folder: FolderCreate, admin: AdminFlag):
+    # An admin session creates folders inside the private workspace; everyone
+    # else creates public ones. The client never gets to choose this.
     try:
-        response = supabase.table("folders").insert({"name": folder.name}).execute()
+        response = supabase.table("folders").insert({
+            "name": folder.name,
+            "is_admin": admin,
+        }).execute()
         return response.data[0]
     except APIError as e:
         if "duplicate" in str(e).lower() or "unique" in str(e).lower():
@@ -32,12 +39,15 @@ def create_folder(folder: FolderCreate):
         )
 
 @router.delete("/delete/{folder_id}", response_model=FolderDeleteResponse)
-def delete_folder(folder_id: UUID):
+def delete_folder(folder_id: UUID, admin: AdminFlag):
+    # 404s for a non-admin targeting an admin folder, so folder IDs can't be
+    # probed for existence.
+    assert_folder_visible(folder_id, admin)
     try:
         # Delete related records first to avoid foreign key constraints
         supabase.table("failed_save_urls").delete().eq("folder_id", str(folder_id)).execute()
         supabase.table("videos").delete().eq("folder_id", str(folder_id)).execute()
-        
+
         response = supabase.table("folders").delete().eq("id", str(folder_id)).execute()
         deleted = len(response.data) > 0
         return FolderDeleteResponse(
@@ -52,9 +62,16 @@ def delete_folder(folder_id: UUID):
         )
 
 @router.get("/fetchall", response_model=List[FolderOut])
-def fetch_all_folders():
+def fetch_all_folders(admin: AdminFlag):
+    """Admin sessions see only the private workspace; everyone else sees only public folders."""
     try:
-        response = supabase.table("folders").select("*").order("created_at", desc=True).execute()
+        response = (
+            supabase.table("folders")
+            .select("*")
+            .eq("is_admin", admin)
+            .order("created_at", desc=True)
+            .execute()
+        )
         return response.data
     except Exception as e:
         raise HTTPException(
@@ -63,9 +80,15 @@ def fetch_all_folders():
         )
 
 @router.get("/fetch", response_model=List[FolderOut])
-def fetch_folder_by_name(name: str):
+def fetch_folder_by_name(name: str, admin: AdminFlag):
     try:
-        response = supabase.table("folders").select("*").ilike("name", f"%{name}%").execute()
+        response = (
+            supabase.table("folders")
+            .select("*")
+            .eq("is_admin", admin)
+            .ilike("name", f"%{name}%")
+            .execute()
+        )
         return response.data
     except Exception as e:
         raise HTTPException(

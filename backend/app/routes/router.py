@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from app.routes import (
+   admin,
    chatgpturlchecker,
    downloads,
    failed_urls,
@@ -11,6 +12,7 @@ from app.routes import (
 
 api_router = APIRouter()
 
+api_router.include_router(admin.router)
 api_router.include_router(chatgpturlchecker.router)
 api_router.include_router(downloads.router)
 api_router.include_router(failed_urls.router)

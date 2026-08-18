@@ -4,6 +4,7 @@ import React, {
   createContext, useContext, useState, useEffect,
   useCallback, useRef, ReactNode,
 } from "react";
+import { apiFetch, apiUrl } from "@/lib/api";
 
 export type DownloadStatus = "fresh" | "pending" | "downloaded" | "cancelled" | "failed";
 
@@ -55,8 +56,6 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   const startingRef = useRef<Set<string>>(new Set());
   const pollingRef = useRef<Set<string>>(new Set());
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-
   const hasActiveDownloads = Object.values(jobs).some(
     (j) => j.status === "queued" || j.status === "downloading"
   );
@@ -64,7 +63,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   // ── Load persistent statuses for a folder ─────────────────────────────────
   const loadFolderStatuses = useCallback(async (folderId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/video-status/folder/${folderId}`);
+      const res = await apiFetch(`/video-status/folder/${folderId}`);
       if (!res.ok) return;
       const data: Record<string, { status: DownloadStatus }> = await res.json();
       const flat: Record<string, DownloadStatus> = {};
@@ -75,12 +74,12 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.error("Failed to load folder statuses", e);
     }
-  }, [API_BASE]);
+  }, []);
 
   // ── Sync job completion to DB ──────────────────────────────────────────────
   const syncStatusToDB = useCallback(async (videoId: string, status: DownloadStatus) => {
     try {
-      await fetch(`${API_BASE}/video-status/update`, {
+      await apiFetch("/video-status/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_id: videoId, status }),
@@ -89,7 +88,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.error("Failed to sync download status to DB", e);
     }
-  }, [API_BASE]);
+  }, []);
 
   // ── Directory picker ───────────────────────────────────────────────────────
   const pickDownloadDir = useCallback(async () => {
@@ -110,7 +109,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   const triggerSave = useCallback(async (jobId: string, filename: string) => {
     if (downloadedJobIds.current.has(jobId)) return;
     downloadedJobIds.current.add(jobId);
-    const fileUrl = `${API_BASE}/download/file/${jobId}`;
+    const fileUrl = apiUrl(`/download/file/${jobId}`);
 
     if (dirHandleRef.current) {
       try {
@@ -133,7 +132,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  }, [API_BASE]);
+  }, []);
 
   // ── Queue runner ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -154,7 +153,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
           // Mark as pending in DB
           syncStatusToDB(nextVideoId, "pending");
 
-          const res = await fetch(`${API_BASE}/download/start`, {
+          const res = await apiFetch("/download/start", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ video_id: nextVideoId }),
@@ -182,7 +181,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
         }
       })();
     }
-  }, [jobs, API_BASE, syncStatusToDB]);
+  }, [jobs, syncStatusToDB]);
 
   // ── Poller ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -196,7 +195,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
         if (!job.jobId || pollingRef.current.has(job.jobId)) continue;
         pollingRef.current.add(job.jobId);
         try {
-          const res = await fetch(`${API_BASE}/download/progress/${job.jobId}`);
+          const res = await apiFetch(`/download/progress/${job.jobId}`);
           if (!res.ok) {
             if (res.status === 404) {
               setJobs((prev) => ({
@@ -247,7 +246,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [jobs, API_BASE, triggerSave, syncStatusToDB]);
+  }, [jobs, triggerSave, syncStatusToDB]);
 
   // ── Public API ─────────────────────────────────────────────────────────────
   const addToQueue = useCallback((videoId: string) => {
@@ -269,9 +268,9 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     }));
     syncStatusToDB(videoId, "cancelled");
     if (job.jobId) {
-      fetch(`${API_BASE}/download/cancel/${job.jobId}`, { method: "POST" }).catch(() => {});
+      apiFetch(`/download/cancel/${job.jobId}`, { method: "POST" }).catch(() => {});
     }
-  }, [jobs, API_BASE, syncStatusToDB]);
+  }, [jobs, syncStatusToDB]);
 
   const removeJob = useCallback((videoId: string) => {
     setJobs((prev) => {
@@ -291,11 +290,11 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
         }));
         syncStatusToDB(job.videoId, "cancelled");
         if (job.jobId) {
-          fetch(`${API_BASE}/download/cancel/${job.jobId}`, { method: "POST" }).catch(() => {});
+          apiFetch(`/download/cancel/${job.jobId}`, { method: "POST" }).catch(() => {});
         }
       }
     }
-  }, [jobs, API_BASE, syncStatusToDB]);
+  }, [jobs, syncStatusToDB]);
 
   return (
     <DownloadQueueContext.Provider value={{

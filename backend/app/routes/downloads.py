@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from app.supabase import supabase
+from app.admin_auth import AdminFlag, assert_video_visible
 from app.ytdlp_common import (
     apply_youtube_opts,
     extract_with_youtube_fallback,
@@ -272,7 +273,11 @@ class StartDownloadRequest(BaseModel):
 
 
 @router.post("/start")
-def start_download(request: StartDownloadRequest):
+def start_download(request: StartDownloadRequest, admin: AdminFlag):
+    # Gate here rather than on /progress or /file: those take an opaque job_id
+    # that only the caller who started the job ever learns.
+    assert_video_visible(request.video_id, admin)
+
     # Check if this video already has an active job
     for existing_job in jobs.values():
         if (existing_job.get("video_id") == request.video_id and

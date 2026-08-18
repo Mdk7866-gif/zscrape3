@@ -5,6 +5,7 @@ import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
 import Footer from "@/components/Footer";
 import { DownloadQueueProvider } from "@/components/DownloadQueueContext";
+import { AdminProvider } from "@/components/AdminContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,19 +33,23 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col h-screen bg-slate-50 text-zinc-900">
-        <DownloadQueueProvider>
-          <Navbar />
-          <div className="flex flex-1 overflow-hidden">
-            {/* Desktop sidebar — hidden on mobile (mobile uses drawer in Navbar) */}
-            <div className="hidden lg:flex lg:w-64 lg:shrink-0 h-full overflow-hidden border-r border-zinc-200">
-              <Sidebar />
+        {/* AdminProvider wraps the queue: components inside read admin state to
+            decide which workspace's folders/videos to load. */}
+        <AdminProvider>
+          <DownloadQueueProvider>
+            <Navbar />
+            <div className="flex flex-1 overflow-hidden">
+              {/* Desktop sidebar — hidden on mobile (mobile uses drawer in Navbar) */}
+              <div className="hidden lg:flex lg:w-64 lg:shrink-0 h-full overflow-hidden border-r border-zinc-200">
+                <Sidebar />
+              </div>
+              <main className="flex-1 overflow-y-auto bg-white">
+                {children}
+              </main>
             </div>
-            <main className="flex-1 overflow-y-auto bg-white">
-              {children}
-            </main>
-          </div>
-          <Footer />
-        </DownloadQueueProvider>
+            <Footer />
+          </DownloadQueueProvider>
+        </AdminProvider>
       </body>
     </html>
   );

@@ -66,12 +66,23 @@ Frontend talks to the backend via `NEXT_PUBLIC_API_URL` (defaults to `http://127
 
 ### Data model (Supabase/Postgres — see `backend/zscrape3database.dbml` and `zscrape3_database.sql`)
 
-- `folders` — top-level organizational unit (unique `name`).
+- `folders` — top-level organizational unit (unique `name`). `is_admin` splits the table into two workspaces: `false` = public, `true` = the private admin workspace (see "Admin workspace" below).
 - `videos` — belongs to a folder (`folder_id`), unique on `(folder_id, url)`. Stores extracted metadata: title, duration, platform, thumbnail, upload_date, file_size_bytes.
 - `failed_save_urls` — URLs that failed metadata extraction during bulk upload, per folder, so users can retry/inspect them.
 - `video_download_status` — one row per video (unique `video_id`), enum status `fresh|pending|downloaded|cancelled|failed`. A video with no row is implicitly `fresh`.
 
-The backend talks to Supabase directly via the `supabase-py` client (`app/supabase.py`), using the **service role/secret key** — there is no ORM/migrations layer in this repo; schema changes are applied to Supabase out of band and should be reflected back into the `.dbml`/`.sql` files.
+The backend talks to Supabase directly via the `supabase-py` client (`app/supabase.py`), using the **service role/secret key** — there is no ORM/migrations layer in this repo; schema changes are applied to Supabase out of band and should be reflected back into the `.dbml`/`.sql` files. Hand-written migrations live in `migrations/` for reference; they must be run manually in the Supabase SQL editor (the Python client cannot execute DDL). **Apply the SQL before deploying code that depends on the new column** — the dev server hot-reloads, so editing a route first takes the running app down.
+
+### Admin workspace
+
+A password-gated private workspace: the admin creates folders / adds URLs / downloads exactly like a normal user, but that content is invisible to everyone else. `ADMIN_PASSWORD` in `backend/.env` gates it (empty disables admin login — fails closed).
+
+- `app/admin_auth.py` — session tokens (in-memory, 12h TTL, lost on restart like the download job store) plus the visibility helpers `assert_folder_visible()` / `assert_video_visible()`. Non-admins hitting admin content get **404, not 403**, so folder UUIDs can't be probed for existence.
+- `routes/admin.py` (`/admin/*`) — `login` (constant-time compare via `secrets.compare_digest`), `logout`, and `session` (lets the frontend revalidate a stored token after a reload).
+- **Presence of a valid `X-Admin-Token` header selects the workspace.** `/folder/fetchall` filters `.eq("is_admin", admin)`, so the same endpoint returns public folders without a token and admin folders with one; "exit admin" is just dropping the token. `/folder/create` sets `is_admin` from the session — never from client input.
+- Every folder- and video-scoped route calls one of the assert helpers: `crudvideos`, `failed_urls`, `video_download_status`, and `/download/start`. `/download/progress` and `/download/file` are deliberately *not* gated — they take an opaque job UUID only the caller who started the job ever learns. **Any new folder/video-scoped route must add its own check**; the guard is per-route, not global middleware.
+- Frontend: `lib/api.ts` (`apiFetch` attaches the token from `sessionStorage`; the password itself is never stored client-side) and `components/AdminContext.tsx` (`useAdmin()` → `isAdmin`/`checking`/`login`/`logout`). Components that load folder- or video-scoped data must include `isAdmin` in their effect deps and skip while `checking` is true, or they'll fetch the wrong workspace on first paint.
+- Known minor limitation: `folders.name` is globally unique, so creating a public folder whose name matches an existing admin folder returns "already exists" — a small name-only leak, kept because relaxing the constraint is riskier than the leak.
 
 ### Backend request flow (`backend/app/`)
 

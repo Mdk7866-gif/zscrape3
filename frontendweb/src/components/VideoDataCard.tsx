@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useDownloadQueue } from "@/components/DownloadQueueContext";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
+import { apiUrl } from "@/lib/api";
 
 interface VideoData {
   id: string;
@@ -82,8 +83,8 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
     if (!video.thumbnail) return "";
     const lower = video.thumbnail.toLowerCase();
     if (lower.includes("fbcdn.net") || lower.includes("cdninstagram.com") || lower.includes("scontent")) {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-      return `${apiBase}/proxy/image?url=${encodeURIComponent(video.thumbnail)}`;
+      // Plain <img src>, not a fetch — the thumbnail proxy needs no auth.
+      return apiUrl(`/proxy/image?url=${encodeURIComponent(video.thumbnail)}`);
     }
     return video.thumbnail;
   };

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
 
     OPENAI_MODEL: str = "gpt-4.1-mini"
     DOWNLOADS_DIR: str = "downloads"
+
+    # Gates the private admin workspace. Empty disables admin login entirely
+    # (fail closed) rather than allowing a blank password through.
+    ADMIN_PASSWORD: str = ""
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
     MAX_BULK_URLS: int = 200
 

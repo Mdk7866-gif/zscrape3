@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import AlertMessagePopUp from "@/components/AlertMessagePopUp";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
+import { apiFetch } from "@/lib/api";
 
 interface FailedUrl {
   id: string;
@@ -49,13 +50,11 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
   const [confirm, setConfirm] = useState<{ type: "single"; id: string } | { type: "all" } | { type: "tab"; tab: "tiktok" | "other" } | null>(null);
   const [alert, setAlert] = useState<{ title: string; message: string; type?: "info" | "success" | "warning" | "error" } | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-
   const fetchUrls = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API_BASE}/failed-urls/fetchall?folder_id=${folderId}`);
+      const res = await apiFetch(`/failed-urls/fetchall?folder_id=${folderId}`);
       if (!res.ok) throw new Error("Failed to load failed URLs");
       const data = await res.json();
       setUrls(data);
@@ -64,7 +63,7 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
     } finally {
       setLoading(false);
     }
-  }, [folderId, API_BASE]);
+  }, [folderId]);
 
   useEffect(() => {
     fetchUrls();
@@ -101,7 +100,7 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
 
   const deleteOne = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/failed-urls/delete/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/failed-urls/delete/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed");
       setUrls((prev) => prev.filter((u) => u.id !== id));
     } catch {
@@ -111,7 +110,7 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
 
   const deleteAll = async () => {
     try {
-      const res = await fetch(`${API_BASE}/failed-urls/delete-all?folder_id=${folderId}`, { method: "DELETE" });
+      const res = await apiFetch(`/failed-urls/delete-all?folder_id=${folderId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete all failed");
       setUrls([]);
     } catch {
@@ -124,7 +123,7 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
     try {
       await Promise.all(
         toDelete.map((u) =>
-          fetch(`${API_BASE}/failed-urls/delete/${u.id}`, { method: "DELETE" })
+          apiFetch(`/failed-urls/delete/${u.id}`, { method: "DELETE" })
         )
       );
       const toDeleteIds = new Set(toDelete.map((u) => u.id));

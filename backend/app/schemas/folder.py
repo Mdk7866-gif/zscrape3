@@ -11,6 +11,7 @@ class FolderCreate(BaseModel):
 class FolderOut(BaseModel):
     id: UUID
     name: str
+    is_admin: bool = False
     created_at: datetime
     updated_at: datetime
 

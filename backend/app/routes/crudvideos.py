@@ -4,6 +4,7 @@ from uuid import UUID
 from datetime import date
 
 from app.supabase import supabase
+from app.admin_auth import AdminFlag, assert_folder_visible, assert_video_visible
 from app.schemas.video import (
     VideoOut,
     VideoDeleteResponse,
@@ -19,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/fetchall", response_model=list[VideoOut])
-def fetch_all_videos(folder_id: UUID):
+def fetch_all_videos(folder_id: UUID, admin: AdminFlag):
     """Fetch all videos in a folder ordered by created_at descending (newest first)."""
+    # 404s rather than leaking that an admin folder exists at this ID.
+    assert_folder_visible(folder_id, admin)
     try:
         response = (
             supabase.table("videos")
@@ -36,7 +39,8 @@ def fetch_all_videos(folder_id: UUID):
 
 
 @router.delete("/delete/{video_id}", response_model=VideoDeleteResponse)
-def delete_video(video_id: UUID):
+def delete_video(video_id: UUID, admin: AdminFlag):
+    assert_video_visible(video_id, admin)
     try:
         response = supabase.table("videos").delete().eq("id", str(video_id)).execute()
         if len(response.data) == 0:
@@ -53,11 +57,15 @@ from fastapi.responses import StreamingResponse
 import json
 
 @router.post("/bulk-upload")
-def bulk_upload_videos(request: BulkVideoUploadRequest):
+def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
     """
     Process multiple video URLs concurrently, extract metadata, and insert into Supabase.
     Returns a stream of JSON lines (NDJSON) to provide live progress to the client.
     """
+    # Checked before the stream opens — once StreamingResponse starts, raising
+    # an HTTPException can no longer produce a proper error status.
+    assert_folder_visible(request.folder_id, admin)
+
     def event_stream():
         urls = []
         for url in request.urls:
