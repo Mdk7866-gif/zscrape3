@@ -11,6 +11,19 @@ services:
       - ./backend/downloads:/app/downloads
     env_file:
       - ./backend/.env
+    environment:
+      # Where yt-dlp fetches GVS PO tokens; without them YouTube drops to 360p.
+      - POT_PROVIDER_URL=http://bgutil-provider:4416
+    depends_on:
+      - bgutil-provider
+    restart: always
+
+  # Supplies the PO tokens yt-dlp needs for full-quality YouTube downloads.
+  # Keep this tag version-matched with bgutil-ytdlp-pot-provider in backend/pyproject.toml.
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    container_name: zscrape3-potoken
+    init: true
     restart: always
 
   frontend:

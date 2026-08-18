@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from app.supabase import supabase
+from app.ytdlp_common import apply_youtube_opts
 
 router = APIRouter(prefix="/download", tags=["download"])
 logger = logging.getLogger(__name__)
@@ -117,7 +118,9 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
     if platform == "instagram":
         base["extractor_args"] = {"instagram": {"include_highlights": ["0"]}}
 
-    return base
+    # Must come last: merges the YouTube JS-runtime / player-client / PO-token
+    # settings into whatever extractor_args the branches above set.
+    return apply_youtube_opts(base)
 
 
 # ── Blocking download worker ───────────────────────────────────────────────────

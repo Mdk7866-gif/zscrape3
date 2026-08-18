@@ -24,6 +24,19 @@ There is no test suite in this repo currently.
 
 Backend needs a `backend/.env` (see `backend/env.example` for the required keys: Supabase URL/secret key, OpenAI key/model, allowed CORS origins, downloads dir, max bulk URLs). `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are required with no default (app fails to start without them).
 
+**YouTube downloads need two extra pieces of infrastructure** (see `app/ytdlp_common.py` for the full explanation):
+
+1. **A JavaScript runtime** — `deno`, or `node >= 22`, on PATH. Without one yt-dlp cannot solve YouTube's player JS challenge, silently loses formats, and large downloads die partway with `HTTP Error 403: Forbidden`.
+2. **The bgutil PO token provider** running on `http://127.0.0.1:4416`. Downloads still work without it, but silently degrade to 360p.
+
+   For **local dev** (`uv run dev`), run it as a plain Node process in its own terminal, alongside the backend:
+   ```
+   node bgutil-provider/build/main.js
+   ```
+   `bgutil-provider/` at the repo root is a local install of https://github.com/Brainicism/bgutil-ytdlp-pot-provider (gitignored — not committed). To set it up from scratch: clone the repo at the tag matching the `bgutil-ytdlp-pot-provider` pin in `pyproject.toml` (currently `1.3.1`), run `npm install && npx tsc` inside its `server/` folder, then copy `build/`, `node_modules/`, and `package.json` into `bgutil-provider/` at the repo root.
+
+   For **Docker** (`docker-compose up`), this is already wired up as the `bgutil-provider` service — no extra steps needed. Keep its image tag in `docker-compose.yml` version-matched with the `bgutil-ytdlp-pot-provider` pin in `pyproject.toml` — the plugin and provider must agree.
+
 ### Frontend (`frontendweb/`, Next.js 16 / React 19)
 
 ```
@@ -74,6 +87,7 @@ The backend talks to Supabase directly via the `supabase-py` client (`app/supaba
 
 ### Cross-cutting notes
 
+- `app/ytdlp_common.py` holds the YouTube-specific yt-dlp settings (JS runtime, `tv_simply` player client, PO token provider URL) shared by both yt-dlp call sites. Its `apply_youtube_opts()` is called **last** in each options builder because it merges into `extractor_args` rather than replacing it, preserving the per-platform args set above it. If YouTube downloads start 403-ing partway through again, that file is the place to look — YouTube changes this roughly every few months.
 - Platform detection (twitter/x, instagram, facebook, reddit, tiktok, youtube-or-other) is reimplemented independently in at least three places (`chatgpturlchecker.py`, `yt_dlpextractmetadataofvideo.py`, `downloads.py`) with slightly different platform sets — when changing platform behavior, check all three.
 - Download job state (`downloads.py`'s `jobs` dict) is purely in-memory; restarting the backend orphans any in-flight downloads (frontend will see 404s on progress polling and mark them cancelled).
 - Bulk operations (`bulk-upload`) are the main perf-sensitive path — metadata extraction is deliberately parallelized (5 workers) and results stream back as NDJSON rather than waiting for the whole batch.

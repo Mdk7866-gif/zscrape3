@@ -4,6 +4,8 @@ import os
 import urllib.request
 import urllib.error
 
+from app.ytdlp_common import apply_youtube_opts
+
 logger = logging.getLogger(__name__)
 
 # Common User-Agent to avoid bot detection
@@ -113,6 +115,10 @@ def extract_video_metadata(url: str) -> dict | None:
             "/bestvideo+bestaudio"
             "/best"
         )
+
+    # Must come last: merges the YouTube JS-runtime / player-client / PO-token
+    # settings into whatever extractor_args the branches above set.
+    apply_youtube_opts(base_opts)
 
     try:
         with yt_dlp.YoutubeDL(base_opts) as ydl:
