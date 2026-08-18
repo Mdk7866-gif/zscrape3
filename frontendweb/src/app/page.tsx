@@ -14,7 +14,7 @@ import Reveal from "@/components/Reveal";
 import HeroShowcase from "@/components/home/HeroShowcase";
 import CountUp from "@/components/home/CountUp";
 import SpotlightCard from "@/components/home/SpotlightCard";
-import PlatformBadge from "@/components/home/PlatformBadge";
+import PlatformBadge from "@/components/PlatformBadge";
 import { APP_VERSION } from "@/lib/version";
 import { PLATFORMS } from "@/lib/platforms";
 

@@ -143,9 +143,11 @@ def extract_video_metadata(url: str) -> dict | None:
             if sorted_thumbs:
                 thumbnail = sorted_thumbs[0]["url"]
 
+        duration = info_dict.get("duration") or _derive_duration_from_fragments(info_dict)
+
         return {
             "title": info_dict.get("title") or "Unknown Title",
-            "duration_seconds": int(info_dict.get("duration") or 0),
+            "duration_seconds": int(duration or 0),
             "platform": platform if platform != "unknown" else info_dict.get("extractor_key", "unknown").lower(),
             "thumbnail": thumbnail,
             "url": url,
@@ -155,6 +157,36 @@ def extract_video_metadata(url: str) -> dict | None:
     except Exception as e:
         logger.error(f"Failed to extract metadata for {url}: {e}")
         return None
+
+
+def _derive_duration_from_fragments(info_dict: dict) -> float | None:
+    """
+    Fallback for when yt-dlp's top-level `duration` is missing.
+
+    Instagram's extractor (yt_dlp/extractor/instagram.py, InstagramBaseIE
+    ._extract_product_media) sources `duration` from a single field in
+    Instagram's own API/GraphQL response (`video_duration`). When that field
+    is absent — seen in practice on some Reels even though a real DASH
+    manifest is present — yt-dlp has no fallback of its own: it parses the
+    manifest into per-fragment `duration`s (real seconds, used to fetch each
+    segment) but never sums them into the top-level `duration` field.
+
+    Recovering it here is safe for any platform: it only ever fires when
+    `duration` is already missing, and only reads data yt-dlp already
+    extracted (no extra network calls).
+    """
+    best_total = 0.0
+    for fmt in info_dict.get("formats") or []:
+        fragments = fmt.get("fragments")
+        if not fragments:
+            continue
+        total = sum(frag.get("duration") or 0 for frag in fragments)
+        # A video format's fragments sum to the real duration; audio-only or
+        # thumbnail-storyboard "formats" have their own (usually shorter or
+        # equal) fragment durations, so the longest total wins.
+        if total > best_total:
+            best_total = total
+    return best_total or None
 
 
 def _parse_upload_date(raw: str | None) -> str | None:

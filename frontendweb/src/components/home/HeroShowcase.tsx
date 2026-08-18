@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import PlatformBadge from "@/components/home/PlatformBadge";
+import PlatformBadge from "@/components/PlatformBadge";
 import { PLATFORMS } from "@/lib/platforms";
 
 /* The three beats of the product loop: paste → extract → download. */

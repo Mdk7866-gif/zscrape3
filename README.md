@@ -55,12 +55,19 @@ zscrape3/
 ├── frontendweb/                 — Next.js 16 / React 19 app
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── page.tsx                 — landing page
-│   │   │   ├── layout.tsx               — root layout, wraps DownloadQueueProvider
-│   │   │   ├── globals.css
+│   │   │   ├── page.tsx                 — landing page (server component; animated bits
+│   │   │   │                                are client islands from components/home/)
+│   │   │   ├── layout.tsx               — root layout: Theme/Admin/DownloadQueue providers,
+│   │   │   │                                ambient background, pre-paint theme script
+│   │   │   ├── globals.css              — semantic color tokens (light/dark), CLS-safe
+│   │   │   │                                utilities (skeleton, clamp-2, reveal, bg-grid)
 │   │   │   └── folder/[id]/page.tsx     — per-folder video list/management
 │   │   ├── lib/
-│   │   │   └── api.ts                   — apiFetch wrapper; attaches the admin token
+│   │   │   ├── api.ts                   — apiFetch wrapper; attaches the admin token
+│   │   │   ├── useModal.ts              — shared Escape/scroll-lock/focus-trap for popups
+│   │   │   ├── platforms.ts             — platform name/slug + react-icons brand logo + brand
+│   │   │   │                                color, and getPlatform() to look one up by slug
+│   │   │   └── version.ts               — single source of truth for APP_VERSION
 │   │   └── components/
 │   │       ├── DownloadQueueContext.tsx        — client-side download queue/orchestrator (app-wide)
 │   │       ├── VideoDataCard.tsx               — single video list item
@@ -68,15 +75,24 @@ zscrape3/
 │   │       ├── FailedUrlShowPopUpCard.tsx      — failed-URL review/retry popup
 │   │       ├── AdminContext.tsx                — admin session state (useAdmin hook)
 │   │       ├── AdminAskPasswordPopUp.tsx       — admin login prompt
+│   │       ├── ThemeProvider.tsx               — light/dark/system theme (useTheme hook)
+│   │       ├── ThemeToggle.tsx                 — segmented theme switch, shown in the navbar
+│   │       ├── Reveal.tsx                      — scroll-reveal wrapper (opacity/transform only)
+│   │       ├── PlatformBadge.tsx               — circular brand-colored platform logo chip
+│   │       │                                     (video cards' on-thumbnail badge + landing page)
 │   │       ├── Sidebar.tsx                     — folder list/navigation
 │   │       ├── Navbar.tsx
 │   │       ├── Footer.tsx
 │   │       ├── AlertMessagePopUp.tsx           — shared alert modal
-│   │       └── ConformationMessagePopUp.tsx    — shared confirm modal
+│   │       ├── ConformationMessagePopUp.tsx    — shared confirm modal
+│   │       └── home/                           — landing-page-only client islands
+│   │           ├── HeroShowcase.tsx                — looping paste→extract→download mock
+│   │           ├── CountUp.tsx                     — animated stat counters
+│   │           └── SpotlightCard.tsx               — cursor-tracking glow on feature cards
 │   ├── public/                   — static assets (svg icons)
 │   ├── AGENTS.md                  — Next.js version notes for AI coding agents (auto-loaded)
 │   ├── Dockerfile
-│   ├── package.json
+│   ├── package.json              — deps: next/react/tailwind + react-icons (platform logos)
 │   ├── next.config.ts
 │   ├── eslint.config.mjs
 │   └── tsconfig.json

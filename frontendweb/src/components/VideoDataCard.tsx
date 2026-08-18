@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useDownloadQueue } from "@/components/DownloadQueueContext";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
+import PlatformBadge from "@/components/PlatformBadge";
 import { apiUrl } from "@/lib/api";
+import { getPlatform } from "@/lib/platforms";
 
 interface VideoData {
   id: string;
@@ -30,38 +32,20 @@ function formatUploadDate(dateStr?: string): string {
   return dateStr;
 }
 
-/** m:ss, or h:mm:ss once the video runs past an hour. */
+/**
+ * m:ss, or h:mm:ss once the video runs past an hour. A real video's duration
+ * is never actually 0 — that value means the extractor couldn't determine it
+ * (a known gap for some Instagram posts) — so it's treated as unknown rather
+ * than displayed as a literal "0:00", which reads as a wrong duration rather
+ * than a missing one.
+ */
 function formatDuration(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "--:--";
+  if (!Number.isFinite(seconds) || seconds <= 0) return "--:--";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   const ss = s.toString().padStart(2, "0");
   return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${ss}` : `${m}:${ss}`;
-}
-
-/** Per-platform accent, as an OKLCH hue so both themes stay in gamut. */
-const PLATFORM_HUE: Record<string, number> = {
-  youtube: 25,
-  twitter: 250,
-  x: 250,
-  instagram: 340,
-  reddit: 45,
-  facebook: 255,
-  tiktok: 190,
-};
-
-function platformStyle(platform: string): React.CSSProperties {
-  const hue = PLATFORM_HUE[platform.toLowerCase()];
-  if (hue === undefined) return {};
-  return {
-    color: `oklch(from var(--fg) l c h)`,
-    background: `oklch(0.62 0.2 ${hue} / 0.14)`,
-    borderColor: `oklch(0.62 0.2 ${hue} / 0.35)`,
-    // Text picks up the platform hue directly; the soft fill behind it keeps
-    // contrast acceptable in both themes.
-    ["--platform-fg" as string]: `oklch(0.62 0.2 ${hue})`,
-  };
 }
 
 export default function VideoDataCard({
@@ -123,6 +107,7 @@ export default function VideoDataCard({
   };
 
   const showThumb = Boolean(video.thumbnail) && !thumbFailed;
+  const platformInfo = getPlatform(video.platform);
 
   return (
     <>
@@ -154,17 +139,24 @@ export default function VideoDataCard({
             </span>
           )}
 
-          {/* Bottom scrim so the chips stay readable over bright frames */}
+          {/* Scrims so the chips stay readable over bright/busy frames — a
+              translucent theme-colored badge (the old approach) has no
+              guaranteed contrast against an arbitrary thumbnail; a solid dark
+              scrim behind fixed white text does. */}
+          <span
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/60 to-transparent"
+          />
           <span
             aria-hidden
             className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/65 to-transparent"
           />
 
-          <span
-            className="absolute left-2 top-2 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm"
-            style={{ ...platformStyle(video.platform), color: "var(--platform-fg, var(--muted))" }}
-          >
-            {video.platform}
+          <span className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 py-0.5 pl-0.5 pr-2 backdrop-blur-sm">
+            {platformInfo && <PlatformBadge platform={platformInfo} size="xs" />}
+            <span className="text-[9px] font-bold uppercase tracking-wider text-white">
+              {platformInfo?.name ?? video.platform}
+            </span>
           </span>
 
           <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white tabular-nums">
