@@ -98,6 +98,20 @@ def bulk_upload_videos(request: BulkVideoUploadRequest):
         def fetch_meta(u: str) -> tuple[str, dict | None]:
             return u, extract_video_metadata(u)
 
+        def clear_from_failed(u: str) -> None:
+            """Remove a URL from failed_save_urls once it succeeds on retry."""
+            if u not in existing_failed_urls:
+                return
+            try:
+                supabase.table("failed_save_urls") \
+                    .delete() \
+                    .eq("folder_id", str(request.folder_id)) \
+                    .eq("url", u) \
+                    .execute()
+                existing_failed_urls.discard(u)
+            except Exception as e:
+                logger.warning(f"Could not clear {u} from failed_save_urls: {e}")
+
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {executor.submit(fetch_meta, url): url for url in urls}
             processed = 0
@@ -147,12 +161,14 @@ def bulk_upload_videos(request: BulkVideoUploadRequest):
                             }).execute()
                         except Exception as e:
                             logger.warning(f"Could not insert download status for {inserted_id}: {e}")
-                            
+
+                        clear_from_failed(raw_url)
                         yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "saved"}) + "\n"
                 except Exception as e:
                     err_msg = str(e).lower()
                     if "duplicate" in err_msg or "23505" in err_msg:
                         duplicate_count += 1
+                        clear_from_failed(raw_url)
                         yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "duplicate"}) + "\n"
                     else:
                         logger.error(f"Error inserting video {raw_url}: {e}")

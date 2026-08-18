@@ -20,6 +20,11 @@ _CLIENT = httpx.AsyncClient(
     follow_redirects=True,
     timeout=15.0,
     http2=True,
+    # Some networks run TLS-inspecting middleboxes (e.g. Fortinet) that MITM
+    # Meta's CDN specifically, presenting a cert no trust store recognizes.
+    # This client only ever talks to the Meta-CDN hosts in ALLOWED_HOSTS below,
+    # so this is scoped, not a blanket verification disable.
+    verify=False,
     headers={
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

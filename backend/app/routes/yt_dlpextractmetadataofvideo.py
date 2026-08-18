@@ -1,10 +1,13 @@
-import yt_dlp
 import logging
-import os
 import urllib.request
 import urllib.error
 
-from app.ytdlp_common import apply_youtube_opts
+from app.ytdlp_common import (
+    apply_youtube_opts,
+    extract_with_youtube_fallback,
+    COOKIE_PATH as _COOKIE_PATH,
+    HAS_COOKIES as _HAS_COOKIES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +17,6 @@ _USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
-
-# Resolve cookie path once at module load — avoids repeated filesystem calls per request
-_COOKIE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
-_HAS_COOKIES = os.path.exists(_COOKIE_PATH)
 
 def _get_platform(url: str) -> str:
     """Detect platform from URL."""
@@ -92,6 +91,12 @@ def extract_video_metadata(url: str) -> dict | None:
     # DO NOT set a format for Reddit — Reddit uses DASH (separate video+audio streams).
     # format="best" fails for DASH-only posts because there is no pre-merged stream.
     # Leaving format unset lets yt-dlp use its own smart default, which handles DASH correctly.
+    if platform in ("instagram", "facebook"):
+        # Some networks run TLS-inspecting middleboxes (e.g. Fortinet) that MITM
+        # Meta's domains specifically, presenting a cert no trust store recognizes.
+        # Nothing else is affected by this — it's scoped to instagram/facebook only.
+        base_opts["nocheckcertificate"] = True
+
     if platform == "instagram":
         base_opts["format"] = "best"
         base_opts["extractor_args"] = {"instagram": {"include_highlights": ["0"]}}
@@ -121,33 +126,32 @@ def extract_video_metadata(url: str) -> dict | None:
     apply_youtube_opts(base_opts)
 
     try:
-        with yt_dlp.YoutubeDL(base_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=False)
-            if not info_dict:
-                return None
+        info_dict = extract_with_youtube_fallback(base_opts, url, platform, download=False)
+        if not info_dict:
+            return None
 
-            # Get the best thumbnail
-            thumbnail = info_dict.get("thumbnail")
-            thumbnails = info_dict.get("thumbnails", [])
-            if thumbnails:
-                # Try to get the highest resolution one
-                sorted_thumbs = sorted(
-                    [t for t in thumbnails if t.get("url")],
-                    key=lambda t: (t.get("width") or 0) * (t.get("height") or 0),
-                    reverse=True
-                )
-                if sorted_thumbs:
-                    thumbnail = sorted_thumbs[0]["url"]
+        # Get the best thumbnail
+        thumbnail = info_dict.get("thumbnail")
+        thumbnails = info_dict.get("thumbnails", [])
+        if thumbnails:
+            # Try to get the highest resolution one
+            sorted_thumbs = sorted(
+                [t for t in thumbnails if t.get("url")],
+                key=lambda t: (t.get("width") or 0) * (t.get("height") or 0),
+                reverse=True
+            )
+            if sorted_thumbs:
+                thumbnail = sorted_thumbs[0]["url"]
 
-            return {
-                "title": info_dict.get("title") or "Unknown Title",
-                "duration_seconds": int(info_dict.get("duration") or 0),
-                "platform": platform if platform != "unknown" else info_dict.get("extractor_key", "unknown").lower(),
-                "thumbnail": thumbnail,
-                "url": url,
-                "upload_date": _parse_upload_date(info_dict.get("upload_date")),
-                "file_size_bytes": info_dict.get("filesize") or info_dict.get("filesize_approx"),
-            }
+        return {
+            "title": info_dict.get("title") or "Unknown Title",
+            "duration_seconds": int(info_dict.get("duration") or 0),
+            "platform": platform if platform != "unknown" else info_dict.get("extractor_key", "unknown").lower(),
+            "thumbnail": thumbnail,
+            "url": url,
+            "upload_date": _parse_upload_date(info_dict.get("upload_date")),
+            "file_size_bytes": info_dict.get("filesize") or info_dict.get("filesize_approx"),
+        }
     except Exception as e:
         logger.error(f"Failed to extract metadata for {url}: {e}")
         return None

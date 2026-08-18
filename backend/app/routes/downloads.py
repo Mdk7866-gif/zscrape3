@@ -15,7 +15,12 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from app.supabase import supabase
-from app.ytdlp_common import apply_youtube_opts
+from app.ytdlp_common import (
+    apply_youtube_opts,
+    extract_with_youtube_fallback,
+    COOKIE_PATH as _COOKIE_PATH,
+    HAS_COOKIES as _HAS_COOKIES,
+)
 
 router = APIRouter(prefix="/download", tags=["download"])
 logger = logging.getLogger(__name__)
@@ -25,10 +30,6 @@ _USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
-
-# Resolve cookie path once at module load — avoids repeated filesystem calls per request
-_COOKIE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt")
-_HAS_COOKIES = os.path.exists(_COOKIE_PATH)
 
 # ── Global job store ──────────────────────────────────────────────────────────
 jobs: dict[str, dict] = {}
@@ -91,6 +92,10 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
 
 
     if platform in ("instagram", "facebook"):
+        # Some networks run TLS-inspecting middleboxes (e.g. Fortinet) that MITM
+        # Meta's domains specifically, presenting a cert no trust store recognizes.
+        # Nothing else is affected by this — it's scoped to instagram/facebook only.
+        base["nocheckcertificate"] = True
         # These platforms pre-merge video+audio. Prefer h264 mp4.
         base["format"] = "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[ext=mp4]/best"
     elif platform == "tiktok":
@@ -193,8 +198,7 @@ def _download_sync(job: dict) -> None:
 
         logger.info(f"Starting download for job {job_id}, platform={platform}, url={url}")
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+        info = extract_with_youtube_fallback(ydl_opts, url, platform, download=True)
 
         if info is None:
             raise ValueError("yt-dlp returned no info")
