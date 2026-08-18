@@ -4,10 +4,9 @@
 CREATE TABLE public.folders (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   name character varying NOT NULL UNIQUE,
-  -- true = private admin workspace, hidden from normal users (see backend/app/admin_auth.py)
-  is_admin boolean NOT NULL DEFAULT false,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  is_admin boolean NOT NULL DEFAULT false,
   CONSTRAINT folders_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.videos (
