@@ -70,8 +70,9 @@ export default function Navbar() {
               Admin
             </button>
           )}
+          {/* Keep in sync with APP_VERSION in app/page.tsx */}
           <span className="text-xs text-zinc-500 bg-zinc-100 border border-zinc-200 px-2.5 py-1 rounded-full font-mono hidden sm:block">
-            v3.0.0
+            18.08.2026V2
           </span>
         </div>
       </nav>

@@ -12,6 +12,12 @@ RUN npm ci
 # Copy the rest of the application
 COPY . .
 
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time, so the
+# backend URL must be supplied HERE — setting it at container runtime does
+# nothing for code running in the browser (see src/lib/api.ts).
+ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # Build the Next.js application
 RUN npm run build
 

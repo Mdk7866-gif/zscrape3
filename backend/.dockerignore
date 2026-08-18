@@ -11,9 +11,19 @@ pip-delete-this-directory.txt
 .toast
 .lucid
 .env
+.env.*
 .vscode
 .git
 .gitignore
 *.db
 *.sqlite3
 downloads/
+
+# Real signed-in YouTube/Reddit session cookies — never bake these into an
+# image, they would ship to Docker Hub with it. Mounted at runtime instead
+# (see the cookies.txt volume in docker-compose.yml).
+cookies.txt
+
+# Build inputs that don't belong in the image itself
+Dockerfile
+.dockerignore

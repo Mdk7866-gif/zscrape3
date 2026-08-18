@@ -9,6 +9,9 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/downloads:/app/downloads
+      # Kept out of the image on purpose (see backend/.dockerignore) — these are
+      # real signed-in sessions. Read-only; the app works without the file.
+      - ./backend/cookies.txt:/app/cookies.txt:ro
     env_file:
       - ./backend/.env
     environment:
@@ -30,12 +33,18 @@ services:
     build:
       context: ./frontendweb
       dockerfile: Dockerfile
+      args:
+        # Must be a build arg: Next.js inlines NEXT_PUBLIC_* into the browser
+        # bundle at build time. Point this at wherever the backend is reachable
+        # FROM THE USER'S BROWSER, not from inside the compose network.
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     image: mdk7866/zscrape3-frontend:latest
     container_name: zscrape3-frontend
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      # Only affects server-side rendering; the client bundle uses the build arg.
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     depends_on:
       - backend
     restart: always

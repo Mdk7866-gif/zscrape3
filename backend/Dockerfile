@@ -22,8 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # yt-dlp needs a JavaScript runtime to solve YouTube's player challenge, or it
 # loses formats and falls back to stream URLs that 403 partway through.
 # Deno ships as a single binary; Debian's nodejs is older than the required v22.
+# Pinned rather than "latest" so an upstream release can't change the image
+# under us; bump deliberately.
+ARG DENO_VERSION=v2.9.5
 RUN curl -fsSL -o /tmp/deno.zip \
-      https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
+      https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip \
     && unzip -q /tmp/deno.zip -d /usr/local/bin \
     && rm /tmp/deno.zip \
     && chmod +x /usr/local/bin/deno \
