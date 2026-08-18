@@ -1,5 +1,7 @@
 "use client";
 
+import { useModal } from "@/lib/useModal";
+
 // Confirmation popup — replaces window.confirm()
 interface ConformationMessagePopUpProps {
   title: string;
@@ -20,52 +22,62 @@ export default function ConformationMessagePopUp({
   onConfirm,
   onCancel,
 }: ConformationMessagePopUpProps) {
+  const ref = useModal<HTMLDivElement>(onCancel);
+
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-100 flex animate-fade-in items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={onCancel}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        className="w-full max-w-sm animate-pop-in overflow-hidden rounded-2xl border border-line bg-surface shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6">
           <div className="flex items-start gap-4">
-            <div className="shrink-0 mt-0.5">
+            <div
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
+                danger ? "bg-danger-soft text-danger" : "bg-accent-soft text-accent"
+              }`}
+            >
               {danger ? (
-                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-                  <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                </div>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
               ) : (
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
-                </div>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                  <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
               )}
             </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-zinc-900 text-base mb-1">{title}</h3>
-              <p className="text-sm text-zinc-600 leading-relaxed">{message}</p>
+            <div className="min-w-0 flex-1">
+              <h3 id="confirm-title" className="mb-1 text-base font-bold">
+                {title}
+              </h3>
+              <p className="text-sm leading-relaxed text-muted">{message}</p>
             </div>
           </div>
         </div>
-        <div className="px-6 pb-5 flex justify-end gap-3">
+        <div className="flex flex-col-reverse gap-2 border-t border-line bg-surface-2/60 px-6 py-4 sm:flex-row sm:justify-end sm:gap-3">
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors"
+            className="rounded-lg px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:bg-surface-3 hover:text-fg sm:py-2"
           >
             {cancelLabel}
           </button>
           <button
-            onClick={() => { onConfirm(); }}
-            className={`px-5 py-2 text-sm font-medium text-white rounded-lg transition-colors ${danger
-                ? "bg-red-600 hover:bg-red-700"
-                : "bg-blue-600 hover:bg-blue-700"
-              }`}
+            onClick={onConfirm}
+            autoFocus
+            className={`rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl sm:py-2 ${
+              danger
+                ? "bg-danger shadow-danger/25 hover:brightness-110"
+                : "bg-gradient-to-r from-accent to-accent-2 shadow-accent/25"
+            }`}
           >
             {confirmLabel}
           </button>

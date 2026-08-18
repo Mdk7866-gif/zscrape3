@@ -3,6 +3,7 @@
 import { useState, ReactNode } from "react";
 import AlertMessagePopUp from "@/components/AlertMessagePopUp";
 import { apiFetch } from "@/lib/api";
+import { useModal } from "@/lib/useModal";
 
 interface ChatgptUrlCheckerPopUpCardProps {
   folderId: string;
@@ -10,7 +11,15 @@ interface ChatgptUrlCheckerPopUpCardProps {
   onSuccess: () => void;
 }
 
-export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSuccess }: ChatgptUrlCheckerPopUpCardProps) {
+const MAX_LINES = 100;
+const MAX_CHARS = 20000;
+const MAX_URLS_PER_BATCH = 50;
+
+export default function ChatgptUrlCheckerPopUpCard({
+  folderId,
+  onClose,
+  onSuccess,
+}: ChatgptUrlCheckerPopUpCardProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [inputText, setInputText] = useState("");
   const [extractedUrls, setExtractedUrls] = useState<string[]>([]);
@@ -18,54 +27,74 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("");
-  const [alert, setAlert] = useState<{ title: string; message: string | ReactNode; type?: "success" | "error" | "warning" | "info" } | null>(null);
+  const [copiedRemaining, setCopiedRemaining] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [alert, setAlert] = useState<{
+    title: string;
+    message: string | ReactNode;
+    type?: "success" | "error" | "warning" | "info";
+  } | null>(null);
+
+  // Don't let Escape close the dialog mid-upload — the request keeps running
+  // and the user loses all feedback about it.
+  const dialogRef = useModal<HTMLDivElement>(() => {
+    if (!loading) onClose();
+  });
+
+  const lineCount = inputText ? inputText.split("\n").length : 0;
+  const overLimit = lineCount > MAX_LINES || inputText.length > MAX_CHARS;
 
   const handleExtract = async () => {
     if (!inputText.trim()) return;
-    
-    const lines = inputText.split("\n");
-    if (lines.length > 100) {
-      setError(`Please paste a maximum of 100 lines. You pasted ${lines.length}/100 lines.`);
+
+    if (lineCount > MAX_LINES) {
+      setError(`Please paste a maximum of ${MAX_LINES} lines. You pasted ${lineCount}.`);
       return;
     }
-
-    if (inputText.length > 20000) {
-      setError(`Text is too long (${inputText.length}/20000 characters). Please paste a smaller batch.`);
+    if (inputText.length > MAX_CHARS) {
+      setError(
+        `Text is too long (${inputText.length}/${MAX_CHARS} characters). Please paste a smaller batch.`
+      );
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
-      setStatusText("Extracting clean URLs with AI...");
-      
+      setStatusText("Extracting clean URLs with AI…");
+
       const chatRes = await apiFetch("/chatgpturlchecker/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: inputText }),
       });
-      
-      if (!chatRes.ok) throw new Error("Failed to process URLs with ChatGPT");
-      
-      const chatData = await chatRes.json();
-      let urls: string[] = chatData.urls || [];
-      
-      if (urls.length === 0) {
-        throw new Error("No valid URLs found in the text.");
-      }
 
-      if (urls.length > 50) {
-        setRemainingUrls(urls.slice(50));
-        urls = urls.slice(0, 50);
-        setError(`Extracted ${urls.length + remainingUrls.length} URLs, but you can only process 50 at a time. The first 50 are loaded below. Copy the remaining ones to use next!`);
+      if (!chatRes.ok) throw new Error("Failed to process URLs with ChatGPT");
+
+      const chatData = await chatRes.json();
+      const allUrls: string[] = chatData.urls || [];
+
+      if (allUrls.length === 0) throw new Error("No valid URLs found in the text.");
+
+      if (allUrls.length > MAX_URLS_PER_BATCH) {
+        const kept = allUrls.slice(0, MAX_URLS_PER_BATCH);
+        const rest = allUrls.slice(MAX_URLS_PER_BATCH);
+        setRemainingUrls(rest);
+        setExtractedUrls(kept);
+        // Counts are computed from `allUrls`, not from state that hasn't been
+        // committed yet — the old version read the stale `remainingUrls` here
+        // and reported the wrong total.
+        setError(
+          `Extracted ${allUrls.length} URLs, but only ${MAX_URLS_PER_BATCH} can be processed at a time. The first ${MAX_URLS_PER_BATCH} are loaded below — copy the remaining ${rest.length} to use next.`
+        );
       } else {
         setRemainingUrls([]);
+        setExtractedUrls(allUrls);
       }
 
-      setExtractedUrls(urls);
       setStep(2);
-    } catch (err: any) {
-      setError(err.message || "An error occurred");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setLoading(false);
       setStatusText("");
@@ -78,8 +107,9 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
     try {
       setLoading(true);
       setError(null);
-      setStatusText(`Starting upload...`);
-      
+      setStatusText("Starting upload…");
+      setProgress(null);
+
       const bulkRes = await apiFetch("/video/bulk-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,7 +117,7 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       });
 
       if (!bulkRes.ok) throw new Error("Failed to upload URLs to database");
-      
+
       const reader = bulkRes.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -96,128 +126,184 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
       let duplicates = 0;
       let failed = 0;
 
-      while (true) {
+      for (;;) {
         const { value, done } = await reader.read();
         if (value) buffer += decoder.decode(value, { stream: true });
-        
+
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-        
+
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
             const data = JSON.parse(line);
             if (data.type === "start") {
-              setStatusText(`Preparing to add ${data.total} videos...`);
+              setStatusText(`Preparing ${data.total} videos…`);
+              setProgress({ done: 0, total: data.total });
             } else if (data.type === "progress") {
-              setStatusText(`Adding videos... (${data.processed}/${data.total})`);
+              setStatusText(`Adding videos… (${data.processed}/${data.total})`);
+              setProgress({ done: data.processed, total: data.total });
             } else if (data.type === "complete") {
               saved = data.saved;
               duplicates = data.duplicates;
               failed = data.failed;
             }
-          } catch (e) {
+          } catch {
             console.error("Failed to parse stream chunk", line);
           }
         }
         if (done) break;
       }
 
-      const successMessage = (
-        <div className="flex flex-col gap-1 mt-1">
-          {saved > 0 && (
-            <div className="text-green-600 font-medium">
-              <span className="mr-1">✅</span> Successfully added {saved} video(s).
-            </div>
-          )}
-          {duplicates > 0 && (
-            <div className="text-blue-600">
-              <span className="mr-1">ℹ️</span> Skipped {duplicates} duplicate URL(s).
-            </div>
-          )}
-          {failed > 0 && (
-            <div className="text-red-600">
-              <span className="mr-1">❌</span> {failed} URL(s) failed and moved to Failed URLs.
-            </div>
-          )}
-        </div>
-      );
-
       setAlert({
-        title: "Upload Complete",
-        message: successMessage,
+        title: "Upload complete",
+        message: (
+          <div className="mt-1 flex flex-col gap-1.5">
+            {saved > 0 && (
+              <span className="font-medium text-ok">✅ Successfully added {saved} video(s).</span>
+            )}
+            {duplicates > 0 && (
+              <span className="text-accent">ℹ️ Skipped {duplicates} duplicate URL(s).</span>
+            )}
+            {failed > 0 && (
+              <span className="text-danger">
+                ❌ {failed} URL(s) failed and moved to Failed URLs.
+              </span>
+            )}
+          </div>
+        ),
         type: failed > 0 ? "warning" : "success",
       });
 
       onSuccess();
-    } catch (err: any) {
-      setError(err.message || "An error occurred");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setLoading(false);
       setStatusText("");
+      setProgress(null);
+    }
+  };
+
+  const copyRemaining = async () => {
+    try {
+      await navigator.clipboard.writeText(remainingUrls.join("\n"));
+      setCopiedRemaining(true);
+      setTimeout(() => setCopiedRemaining(false), 2000);
+    } catch {
+      setAlert({ title: "Copy failed", message: "Could not copy to clipboard.", type: "error" });
     }
   };
 
   const handleAlertClose = () => {
     setAlert(null);
-    if (step === 2) {
-      onClose(); // Close the whole popup after viewing success
-    }
+    if (step === 2) onClose(); // Close the whole popup after viewing success
   };
+
+  const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : 0;
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col">
-          <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
-            <h2 className="text-lg font-semibold text-zinc-800 flex items-center gap-2">
-              ✨ AI URL Extractor
-            </h2>
-            <button 
+      <div
+        className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-black/50 p-3 backdrop-blur-sm sm:p-4"
+        onClick={() => !loading && onClose()}
+      >
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="extractor-title"
+          onClick={(e) => e.stopPropagation()}
+          className="flex max-h-[92dvh] w-full max-w-2xl animate-pop-in flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-2xl"
+        >
+          {/* Header */}
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-surface-2/70 px-4 py-3.5 sm:px-6">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-accent to-accent-2 text-white">
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+                </svg>
+              </span>
+              <div className="min-w-0">
+                <h2 id="extractor-title" className="truncate text-base font-bold">
+                  AI URL Extractor
+                </h2>
+                <p className="text-xs text-subtle">
+                  Step {step} of 2 · {step === 1 ? "paste your text" : "review & add"}
+                </p>
+              </div>
+            </div>
+            <button
               onClick={onClose}
-              className="text-zinc-400 hover:text-zinc-700 transition-colors p-1"
+              disabled={loading}
+              aria-label="Close"
+              className="shrink-0 rounded-lg p-1.5 text-subtle transition-colors hover:bg-surface-3 hover:text-fg disabled:opacity-40"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
             </button>
           </div>
-          
-          <div className="p-6 flex-1">
+
+          {/* Body */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
             {step === 1 ? (
               <>
-                <p className="text-sm text-zinc-500 mb-4">
-                  Paste messy text containing URLs from YouTube, Twitter, Instagram, etc. Our AI will extract all valid links automatically. (Max 100 lines)
+                <p className="mb-3 text-sm text-muted">
+                  Paste messy text containing URLs from YouTube, Twitter, Instagram, and more.
+                  The AI pulls out every valid link automatically.
                 </p>
-                
+
                 <textarea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   disabled={loading}
-                  placeholder="Paste your text here..."
-                  className="w-full h-64 p-4 text-sm bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 resize-none"
+                  placeholder="Paste your text here…"
+                  aria-label="Text containing URLs"
+                  className="h-48 w-full resize-none rounded-xl border border-line bg-surface-2 p-4 font-mono text-sm text-fg placeholder-subtle transition-all focus:border-accent focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent/20 sm:h-60"
                 />
+
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-subtle">
+                  <span>Max {MAX_LINES} lines · {MAX_CHARS.toLocaleString()} characters</span>
+                  <span className={`font-mono tabular-nums ${overLimit ? "font-bold text-danger" : ""}`}>
+                    {lineCount}/{MAX_LINES} lines · {inputText.length.toLocaleString()}/
+                    {MAX_CHARS.toLocaleString()}
+                  </span>
+                </div>
               </>
             ) : (
               <>
-                <p className="text-sm font-medium text-zinc-800 mb-2">
-                  Successfully extracted {extractedUrls.length} valid URL(s):
+                <p className="mb-3 text-sm font-semibold">
+                  Extracted{" "}
+                  <span className="text-accent">{extractedUrls.length}</span> valid URL
+                  {extractedUrls.length !== 1 ? "s" : ""}
                 </p>
-                <div className="w-full h-64 p-4 text-sm bg-zinc-50 border border-zinc-200 rounded-xl overflow-y-auto">
-                  <ul className="list-disc pl-5 space-y-1 text-zinc-600 break-all">
-                    {extractedUrls.map((url, idx) => (
-                      <li key={idx}>{url}</li>
-                    ))}
-                  </ul>
-                </div>
+
+                <ul className="max-h-60 space-y-1 overflow-y-auto rounded-xl border border-line bg-surface-2 p-3 sm:max-h-72">
+                  {extractedUrls.map((url, idx) => (
+                    <li
+                      key={`${url}-${idx}`}
+                      className="flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-3"
+                    >
+                      <span className="mt-0.5 w-6 shrink-0 text-right font-mono text-[10px] tabular-nums text-subtle">
+                        {idx + 1}
+                      </span>
+                      <span className="min-w-0 break-all font-mono text-xs text-muted">{url}</span>
+                    </li>
+                  ))}
+                </ul>
+
                 {remainingUrls.length > 0 && (
-                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
-                    <span className="text-sm text-amber-800 font-medium truncate pr-2">
-                      {remainingUrls.length} URLs remain unadded.
+                  <div className="mt-3 flex flex-col items-start justify-between gap-2 rounded-xl border border-warn-line bg-warn-soft p-3 sm:flex-row sm:items-center">
+                    <span className="text-sm font-medium text-warn">
+                      {remainingUrls.length} URL{remainingUrls.length !== 1 ? "s" : ""} not included
+                      in this batch.
                     </span>
                     <button
-                      onClick={() => navigator.clipboard.writeText(remainingUrls.join('\n'))}
-                      className="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded transition-colors shadow-sm"
+                      onClick={copyRemaining}
+                      className="shrink-0 rounded-lg bg-warn px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:brightness-110"
                     >
-                      Copy Remaining URLs
+                      {copiedRemaining ? "Copied!" : "Copy remaining"}
                     </button>
                   </div>
                 )}
@@ -225,36 +311,57 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
             )}
 
             {error && (
-              <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">
+              <div
+                role="alert"
+                className="mt-4 rounded-xl border border-danger-line bg-danger-soft p-3 text-sm text-danger"
+              >
                 {error}
               </div>
             )}
           </div>
-          
-          <div className="p-4 border-t border-zinc-100 flex items-center justify-between bg-zinc-50/50">
-            <div className="text-sm text-blue-600 font-medium truncate pr-4">
-              {/* Status text hidden during step 2 to prefer the button text */}
-              {step === 1 && statusText}
+
+          {/* Live upload progress — replaces the old text-only status. */}
+          {progress && (
+            <div className="shrink-0 border-t border-line px-4 pt-3 sm:px-6">
+              <div className="mb-1 flex items-center justify-between text-[11px] font-medium">
+                <span className="text-accent">{statusText}</span>
+                <span className="font-mono tabular-nums text-subtle">
+                  {progress.done}/{progress.total}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+                <div
+                  className="h-full origin-left rounded-full bg-gradient-to-r from-accent to-accent-2 transition-transform duration-300"
+                  style={{ transform: `scaleX(${pct / 100})` }}
+                />
+              </div>
             </div>
-            <div className="flex gap-3 shrink-0">
+          )}
+
+          {/* Footer */}
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-line bg-surface-2/70 px-4 py-3.5 sm:px-6">
+            <p className="min-w-0 truncate text-xs font-medium text-accent">
+              {step === 1 ? statusText : ""}
+            </p>
+            <div className="flex shrink-0 gap-2">
               <button
-                onClick={() => step === 2 && !loading ? setStep(1) : onClose()}
+                onClick={() => (step === 2 && !loading ? setStep(1) : onClose())}
                 disabled={loading}
-                className="px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+                className="rounded-lg px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-3 hover:text-fg disabled:opacity-50"
               >
                 {step === 2 ? "Back" : "Cancel"}
               </button>
-              
+
               {step === 1 ? (
                 <button
                   onClick={handleExtract}
-                  disabled={loading || !inputText.trim()}
-                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-blue-600/20 flex items-center gap-2"
+                  disabled={loading || !inputText.trim() || overLimit}
+                  className="flex min-w-[124px] items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition-all hover:shadow-xl disabled:opacity-50 disabled:shadow-none"
                 >
                   {loading ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
-                      Extracting...
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                      Extracting…
                     </>
                   ) : (
                     "Extract URLs"
@@ -264,15 +371,15 @@ export default function ChatgptUrlCheckerPopUpCard({ folderId, onClose, onSucces
                 <button
                   onClick={handleBulkUpload}
                   disabled={loading}
-                  className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:hover:bg-green-600 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-green-600/20 flex items-center gap-2 min-w-[140px] justify-center"
+                  className="flex min-w-[140px] items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-ok to-accent-3 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-ok/25 transition-all hover:shadow-xl disabled:opacity-50 disabled:shadow-none"
                 >
                   {loading ? (
                     <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"/>
-                      {statusText || "Saving..."}
+                      <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                      Saving…
                     </>
                   ) : (
-                    `Add ${extractedUrls.length} URLs`
+                    `Add ${extractedUrls.length} URL${extractedUrls.length !== 1 ? "s" : ""}`
                   )}
                 </button>
               )}

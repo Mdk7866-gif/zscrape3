@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useMemo, useRef, use } from "react";
 import VideoDataCard from "@/components/VideoDataCard";
 import ChatgptUrlCheckerPopUpCard from "@/components/ChatgptUrlCheckerPopUpCard";
 import FailedUrlShowPopUpCard from "@/components/FailedUrlShowPopUpCard";
@@ -11,14 +11,27 @@ import { apiFetch } from "@/lib/api";
 
 const PAGE_SIZE = 50;
 
+interface Video {
+  id: string;
+  title: string;
+  platform: string;
+  url: string;
+  thumbnail?: string;
+  duration_seconds: number;
+  upload_date?: string;
+  file_size_bytes?: number;
+  created_at?: string;
+}
+
 function formatDateHeader(dateStr: string) {
   const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "Unknown date";
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
 }
 
-/** Group an array of videos by their created_at date (YYYY-MM-DD) */
-function groupByDate(videos: any[]): { date: string; label: string; items: any[] }[] {
-  const map = new Map<string, any[]>();
+/** Group videos by their created_at date (YYYY-MM-DD). */
+function groupByDate(videos: Video[]) {
+  const map = new Map<string, Video[]>();
   for (const v of videos) {
     const day = (v.created_at || "").slice(0, 10);
     if (!map.has(day)) map.set(day, []);
@@ -31,13 +44,55 @@ function groupByDate(videos: any[]): { date: string; label: string; items: any[]
   }));
 }
 
-export default function FolderPage({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = use(params);
-  const folderId = resolvedParams.id;
+/**
+ * Build a windowed page list: 1 … 4 5 [6] 7 8 … 20.
+ *
+ * The previous version rendered one button per page, which overflowed the
+ * header into a horizontal scroll once a folder passed a few hundred videos.
+ */
+function pageWindow(current: number, total: number): (number | "gap")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set<number>([1, total, current, current - 1, current + 1]);
+  if (current <= 3) [2, 3, 4].forEach((p) => pages.add(p));
+  if (current >= total - 2) [total - 3, total - 2, total - 1].forEach((p) => pages.add(p));
 
-  const [videos, setVideos] = useState<any[]>([]);
-  const [folderName, setFolderName] = useState<string>("");
-  const [folderCreatedAt, setFolderCreatedAt] = useState<string>("");
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out: (number | "gap")[] = [];
+  let prev = 0;
+  for (const p of sorted) {
+    if (prev && p - prev > 1) out.push("gap");
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
+
+/** Round-robin by platform so the queue spreads requests across sites. */
+function roundRobinByPlatform(items: Video[]): Video[] {
+  const groups = new Map<string, Video[]>();
+  for (const v of items) {
+    const p = v.platform || "other";
+    if (!groups.has(p)) groups.set(p, []);
+    groups.get(p)!.push(v);
+  }
+  const queues = [...groups.values()];
+  const result: Video[] = [];
+  let i = 0;
+  while (result.length < items.length) {
+    const q = queues[i % queues.length];
+    if (q && q.length > 0) result.push(q.shift()!);
+    i++;
+    if (queues.every((q) => q.length === 0)) break;
+  }
+  return result;
+}
+
+export default function FolderPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: folderId } = use(params);
+
+  const [videos, setVideos] = useState<Video[]>([]);
+  const [folderName, setFolderName] = useState("");
+  const [folderCreatedAt, setFolderCreatedAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPopup, setShowPopup] = useState(false);
@@ -45,9 +100,23 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showDownloadAllConfirm, setShowDownloadAllConfirm] = useState(false);
   const [urlsCopied, setUrlsCopied] = useState(false);
+  const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
 
-  const { addToQueue, jobs, hasActiveDownloads, loadFolderStatuses, downloadDir, pickDownloadDir, cancelAllJobs } = useDownloadQueue();
+  // The page renders its own scroll container, so `window.scrollTo` (what this
+  // used to call on page change) scrolled nothing at all — the list stayed
+  // where it was after paging.
+  const scrollRef = useRef<HTMLElement>(null);
+
+  const {
+    addToQueue,
+    jobs,
+    hasActiveDownloads,
+    loadFolderStatuses,
+    downloadDir,
+    pickDownloadDir,
+    cancelAllJobs,
+  } = useDownloadQueue();
   const { isAdmin, checking } = useAdmin();
 
   const fetchVideos = async () => {
@@ -59,10 +128,9 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       // e.g. an admin folder after exiting admin mode, or a stale/guessed URL.
       if (res.status === 404) throw new Error("This folder is not available.");
       if (!res.ok) throw new Error("Failed to fetch videos");
-      const data = await res.json();
-      setVideos(data);
-    } catch (err: any) {
-      setError(err.message);
+      setVideos(await res.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch videos");
     } finally {
       setLoading(false);
     }
@@ -73,12 +141,14 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       const res = await apiFetch("/folder/fetchall");
       if (!res.ok) return;
       const data = await res.json();
-      const folder = data.find((f: any) => f.id === folderId);
+      const folder = data.find((f: { id: string }) => f.id === folderId);
       if (folder) {
         setFolderName(folder.name);
         setFolderCreatedAt(folder.created_at || "");
       }
-    } catch {}
+    } catch {
+      /* the header just stays on its placeholder */
+    }
   };
 
   // Also re-runs when the workspace changes, so exiting admin mode on an admin
@@ -87,9 +157,11 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   useEffect(() => {
     if (checking) return;
     setPage(1);
+    setQuery("");
     fetchVideos();
     fetchFolderInfo();
     loadFolderStatuses(folderId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderId, isAdmin, checking]);
 
   const handleDelete = async (videoId: string) => {
@@ -103,244 +175,355 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     }
   };
 
+  const goToPage = (p: number) => {
+    setPage(p);
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return videos;
+    return videos.filter(
+      (v) =>
+        v.title?.toLowerCase().includes(q) ||
+        v.url?.toLowerCase().includes(q) ||
+        v.platform?.toLowerCase().includes(q)
+    );
+  }, [videos, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Filtering can shrink the list below the current page — clamp rather than
+  // rendering an empty page.
+  const safePage = Math.min(page, totalPages);
+  const paginatedVideos = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
   const handleCopyUrls = async () => {
-    if (videos.length === 0) return;
+    if (paginatedVideos.length === 0) return;
     const urlText = paginatedVideos.map((v) => v.url).join("\n");
     try {
       await navigator.clipboard.writeText(urlText);
-      setUrlsCopied(true);
-      setTimeout(() => setUrlsCopied(false), 2000);
     } catch {
-      // Fallback for browsers that block clipboard
+      // Fallback for browsers that block the async clipboard API
       const el = document.createElement("textarea");
       el.value = urlText;
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
-      setUrlsCopied(true);
-      setTimeout(() => setUrlsCopied(false), 2000);
     }
+    setUrlsCopied(true);
+    setTimeout(() => setUrlsCopied(false), 2000);
   };
 
-  // Pagination
-  const totalPages = Math.ceil(videos.length / PAGE_SIZE);
-  const paginatedVideos = videos.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  // Videos on the current page that need to be downloaded
+  // Videos on the current page that still need downloading
   const videosToDownload = paginatedVideos.filter((v) => {
     const job = jobs[v.id];
-    return !job || (job.status !== "queued" && job.status !== "downloading" && job.status !== "completed");
+    return !job || !["queued", "downloading", "completed"].includes(job.status);
   });
 
-  /** Sort videos in round-robin order by platform to spread requests across platforms */
-  function roundRobinByPlatform(items: any[]): any[] {
-    const groups: Record<string, any[]> = {};
-    for (const v of items) {
-      const p = v.platform || "other";
-      if (!groups[p]) groups[p] = [];
-      groups[p].push(v);
-    }
-    const queues = Object.values(groups);
-    const result: any[] = [];
-    let i = 0;
-    while (result.length < items.length) {
-      const q = queues[i % queues.length];
-      if (q && q.length > 0) result.push(q.shift());
-      i++;
-      if (queues.every((q) => q.length === 0)) break;
-    }
-    return result;
-  }
-
-  const handleDownloadAllConfirmed = () => {
-    setShowDownloadAllConfirm(false);
-    const ordered = roundRobinByPlatform([...videosToDownload]);
-    ordered.forEach((v) => addToQueue(v.id));
-  };
-
-  // Compute active download count for this page
   const activeOnPage = paginatedVideos.filter(
     (v) => jobs[v.id]?.status === "queued" || jobs[v.id]?.status === "downloading"
   ).length;
-  const completedOnPage = paginatedVideos.filter(
-    (v) => jobs[v.id]?.status === "completed"
-  ).length;
 
-  // Group the paginated videos by date
+  const handleDownloadAllConfirmed = () => {
+    setShowDownloadAllConfirm(false);
+    roundRobinByPlatform([...videosToDownload]).forEach((v) => addToQueue(v.id));
+  };
+
   const groups = groupByDate(paginatedVideos);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* Header */}
-      <header className="bg-white border-b border-zinc-200 px-4 sm:px-6 lg:px-8 py-4 sticky top-0 z-10 shrink-0 shadow-sm">
-        <div className="max-w-[1400px] mx-auto w-full flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-zinc-900 truncate flex items-center gap-2">
-              <span className="text-xl">📁</span> {folderName || "Loading..."}
-            </h1>
-            <p className="text-sm text-zinc-500 mt-0.5 flex items-center gap-2 flex-wrap">
-              {folderCreatedAt && (
-                <span className="text-zinc-400 text-xs">
-                  Created {new Date(folderCreatedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                </span>
-              )}
-              <span className="text-zinc-300">·</span>
-              <span>{videos.length} {videos.length === 1 ? "Video" : "Videos"}</span>
-              {totalPages > 1 && <><span className="text-zinc-300">·</span><span>Page {page}/{totalPages}</span></>}
-              {activeOnPage > 0 && (
-                <span className="flex items-center gap-1 text-blue-600 text-xs font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse inline-block" />
-                  {activeOnPage} downloading…
-                </span>
-              )}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              onClick={() => setShowFailedPopup(true)}
-              className="bg-white border border-red-200 hover:bg-red-50 text-red-600 font-medium py-2 px-3.5 rounded-lg text-sm transition-all flex items-center gap-2"
-            >
-              <span className="text-base leading-none">⚠️</span> Failed URLs
-            </button>
-
-            {/* Copy URLs */}
-            <button
-              onClick={handleCopyUrls}
-              disabled={videos.length === 0}
-              title={videos.length === 0 ? "No videos to copy" : `Copy ${paginatedVideos.length} URL(s) to clipboard`}
-              className={`flex items-center gap-2 font-medium py-2 px-3.5 rounded-lg text-sm transition-all border ${
-                videos.length === 0
-                  ? "bg-zinc-50 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-60"
-                  : urlsCopied
-                  ? "bg-green-50 border-green-300 text-green-700"
-                  : "bg-white border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 text-zinc-700"
-              }`}
-            >
-              {urlsCopied ? (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12"/>
+    <div className="flex h-full min-h-0 flex-col">
+      {/* ================= Header ================= */}
+      <header className="sticky top-0 z-10 shrink-0 border-b border-line bg-surface/80 backdrop-blur-xl">
+        <div className="mx-auto w-full max-w-[1600px] px-4 py-3.5 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+            {/* Title block */}
+            <div className="min-w-0 flex-1">
+              <h1 className="flex min-w-0 items-center gap-2.5 text-lg font-bold tracking-tight sm:text-xl">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent-2 text-white">
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
                   </svg>
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                  </svg>
-                  Copy URLs
-                </>
-              )}
-            </button>
-
-            {/* Download All / Cancel All */}
-            {paginatedVideos.length > 0 && (
-              <button
-                onClick={() => {
-                  if (hasActiveDownloads) {
-                    cancelAllJobs();
-                  } else {
-                    if (videosToDownload.length === 0) return;
-                    setShowDownloadAllConfirm(true);
-                  }
-                }}
-                disabled={!hasActiveDownloads && videosToDownload.length === 0}
-                className={`flex items-center gap-2 font-medium py-2 px-3.5 rounded-lg text-sm transition-all border ${
-                  hasActiveDownloads
-                    ? "bg-red-50 border-red-200 text-red-600 hover:bg-red-100 hover:text-red-700"
-                    : videosToDownload.length === 0
-                    ? "bg-zinc-50 border-zinc-200 text-zinc-400 cursor-not-allowed"
-                    : "bg-white border-zinc-300 hover:border-blue-400 hover:bg-blue-50 text-zinc-700 hover:text-blue-700"
-                }`}
-              >
-                {hasActiveDownloads ? (
-                  <>
-                    <span className="w-3.5 h-3.5 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
-                    Cancel All ({activeOnPage})
-                  </>
-                ) : videosToDownload.length === 0 ? (
-                  <>✅ All Downloaded</>
+                </span>
+                {/* Placeholder keeps the exact line height while the name loads,
+                    so the header never grows or shrinks under the content. */}
+                {folderName ? (
+                  <span className="truncate">{folderName}</span>
                 ) : (
+                  <span className="skeleton h-5 w-40 max-w-full rounded" />
+                )}
+              </h1>
+
+              <p className="mt-1 flex min-h-[1.25rem] flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
+                {folderCreatedAt && (
                   <>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7 10 12 15 17 10" />
-                      <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    Download All ({videosToDownload.length})
+                    <span>
+                      Created{" "}
+                      {new Date(folderCreatedAt).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </span>
+                    <span aria-hidden>·</span>
                   </>
                 )}
-              </button>
-            )}
+                <span className="font-medium text-muted">
+                  {videos.length} {videos.length === 1 ? "video" : "videos"}
+                </span>
+                {query && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>{filtered.length} matching</span>
+                  </>
+                )}
+                {totalPages > 1 && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className="tabular-nums">
+                      Page {safePage}/{totalPages}
+                    </span>
+                  </>
+                )}
+                {activeOnPage > 0 && (
+                  <span className="flex items-center gap-1.5 font-medium text-accent">
+                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                    {activeOnPage} downloading…
+                  </span>
+                )}
+              </p>
+            </div>
 
-            <button
-              onClick={() => setShowPopup(true)}
-              disabled={hasActiveDownloads}
-              className={`font-medium py-2 px-3.5 rounded-lg text-sm transition-all flex items-center gap-2 ${
-                hasActiveDownloads
-                  ? "bg-blue-300 text-white cursor-not-allowed opacity-70"
-                  : "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20"
-              }`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14" /><path d="M12 5v14" />
-              </svg>
-              Add Videos
-            </button>
+            {/* Actions */}
+            <div className="flex flex-wrap items-center gap-2">
+              {videos.length > 8 && (
+                <div className="relative order-first w-full sm:order-none sm:w-44 lg:w-52">
+                  <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                    <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+                  </svg>
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Search videos…"
+                    aria-label="Search videos in this folder"
+                    className="w-full rounded-lg border border-line bg-surface-2 py-2 pl-9 pr-3 text-sm text-fg placeholder-subtle transition-colors focus:border-accent focus:bg-surface focus:outline-none"
+                  />
+                </div>
+              )}
+
+              <HeaderButton
+                onClick={() => setShowFailedPopup(true)}
+                tone="danger"
+                label="Failed URLs"
+                icon={
+                  <>
+                    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                    <path d="M12 9v4M12 17h.01" />
+                  </>
+                }
+              />
+
+              <HeaderButton
+                onClick={handleCopyUrls}
+                disabled={paginatedVideos.length === 0}
+                tone={urlsCopied ? "ok" : "neutral"}
+                label={urlsCopied ? "Copied!" : "Copy URLs"}
+                title={
+                  paginatedVideos.length === 0
+                    ? "No videos to copy"
+                    : `Copy ${paginatedVideos.length} URL(s) on this page`
+                }
+                icon={
+                  urlsCopied ? (
+                    <polyline points="20 6 9 17 4 12" />
+                  ) : (
+                    <>
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </>
+                  )
+                }
+              />
+
+              {paginatedVideos.length > 0 && (
+                <HeaderButton
+                  onClick={() => {
+                    if (hasActiveDownloads) cancelAllJobs();
+                    else if (videosToDownload.length > 0) setShowDownloadAllConfirm(true);
+                  }}
+                  disabled={!hasActiveDownloads && videosToDownload.length === 0}
+                  tone={hasActiveDownloads ? "danger" : "neutral"}
+                  label={
+                    hasActiveDownloads
+                      ? `Cancel All (${activeOnPage})`
+                      : videosToDownload.length === 0
+                      ? "All downloaded"
+                      : `Download All (${videosToDownload.length})`
+                  }
+                  icon={
+                    hasActiveDownloads ? (
+                      <>
+                        <circle cx="12" cy="12" r="9" /><path d="m15 9-6 6M9 9l6 6" />
+                      </>
+                    ) : videosToDownload.length === 0 ? (
+                      <polyline points="20 6 9 17 4 12" />
+                    ) : (
+                      <>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                      </>
+                    )
+                  }
+                />
+              )}
+
+              <button
+                onClick={() => setShowPopup(true)}
+                disabled={hasActiveDownloads}
+                title={
+                  hasActiveDownloads
+                    ? "Wait for the current downloads to finish"
+                    : "Add videos to this folder"
+                }
+                className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-3.5 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition-all hover:shadow-xl hover:shadow-accent/35 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M5 12h14" /><path d="M12 5v14" />
+                </svg>
+                <span className="hidden sm:inline">Add Videos</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Save folder hint bar */}
-      {!downloadDir && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-8 py-2 text-xs text-amber-700 flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+      {/* ================= Save-location bar =================
+          Both variants are the same height, so toggling between them (or
+          picking a folder) never shifts the grid below. */}
+      <div
+        className={`shrink-0 border-b px-4 py-2 text-xs sm:px-6 lg:px-8 ${
+          downloadDir
+            ? "border-ok-line bg-ok-soft text-ok"
+            : "border-warn-line bg-warn-soft text-warn"
+        }`}
+      >
+        <div className="mx-auto flex w-full max-w-[1600px] items-center gap-2">
+          <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            {downloadDir ? (
+              <polyline points="20 6 9 17 4 12" />
+            ) : (
+              <>
+                <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                <path d="M12 9v4M12 17h.01" />
+              </>
+            )}
           </svg>
-          No save folder selected — downloaded videos will go to your browser's default Downloads folder.
-          <button onClick={pickDownloadDir} className="ml-1 underline font-semibold hover:text-amber-900">Choose folder</button>
+          <span className="min-w-0 flex-1 truncate">
+            {downloadDir ? (
+              <>
+                Saving to <strong className="font-semibold">{downloadDir}</strong>
+              </>
+            ) : (
+              <>
+                <span className="hidden sm:inline">
+                  No save folder selected — downloads go to your browser&apos;s default Downloads
+                  folder.
+                </span>
+                <span className="sm:hidden">Using browser&apos;s default Downloads folder.</span>
+              </>
+            )}
+          </span>
+          <button
+            onClick={pickDownloadDir}
+            className="shrink-0 font-semibold underline underline-offset-2 hover:opacity-80"
+          >
+            {downloadDir ? "Change" : "Choose folder"}
+          </button>
         </div>
-      )}
-      {downloadDir && (
-        <div className="bg-green-50 border-b border-green-200 px-4 sm:px-8 py-2 text-xs text-green-700 flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-          Downloads will be saved to: <strong className="ml-1">{downloadDir}</strong>
-          <button onClick={pickDownloadDir} className="ml-2 underline hover:text-green-900">Change</button>
-        </div>
-      )}
+      </div>
 
-      {/* Content */}
-      <main className="flex-1 overflow-y-auto bg-white">
-        <div className="max-w-[1400px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+      {/* ================= Content ================= */}
+      <main ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
           {loading ? (
-            <div className="flex items-center justify-center min-h-[300px]">
-              <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            /* Skeletons match the real card grid exactly, so swapping them for
+               data doesn't move anything. */
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4 sm:gap-5">
+              {Array.from({ length: 10 }, (_, i) => (
+                <div
+                  key={i}
+                  className="overflow-hidden rounded-2xl border border-line bg-surface/60"
+                >
+                  <div className="skeleton aspect-video w-full rounded-none" />
+                  <div className="space-y-2 p-3.5">
+                    <div className="skeleton h-3.5 w-[92%]" />
+                    <div className="skeleton h-3.5 w-[60%]" />
+                    <div className="skeleton h-4 w-24 rounded-md" />
+                    <div className="skeleton h-[34px] w-full rounded-lg" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : error ? (
-            <div className="flex items-center justify-center min-h-[300px]">
-              <div className="text-red-500 bg-red-50 px-4 py-3 rounded-lg border border-red-100 text-sm max-w-md text-center">{error}</div>
+            <div className="flex min-h-[320px] items-center justify-center">
+              <div className="max-w-md rounded-2xl border border-danger-line bg-danger-soft px-6 py-5 text-center">
+                <p className="text-sm font-semibold text-danger">{error}</p>
+                <button
+                  onClick={fetchVideos}
+                  className="mt-3 rounded-lg border border-danger-line bg-surface px-4 py-2 text-xs font-semibold text-danger transition-colors hover:bg-danger-soft"
+                >
+                  Try again
+                </button>
+              </div>
             </div>
           ) : videos.length === 0 ? (
-            <div className="flex flex-col items-center justify-center min-h-[300px] text-zinc-400 px-4 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-zinc-100 flex items-center justify-center mb-4 text-3xl">🎬</div>
-              <p className="text-base font-medium text-zinc-600 mb-1">No videos yet</p>
-              <p className="text-sm">Click <strong>Add Videos</strong> to start importing.</p>
-            </div>
+            <EmptyState
+              icon="🎬"
+              title="No videos yet"
+              body="Paste your links into the AI extractor to start importing."
+              action={
+                <button
+                  onClick={() => setShowPopup(true)}
+                  className="mt-5 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition-all hover:shadow-xl"
+                >
+                  Add Videos
+                </button>
+              }
+            />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon="🔍"
+              title="No matches"
+              body={`Nothing in this folder matches “${query}”.`}
+              action={
+                <button
+                  onClick={() => setQuery("")}
+                  className="mt-5 rounded-lg border border-line bg-surface px-5 py-2.5 text-sm font-semibold text-muted transition-colors hover:text-fg"
+                >
+                  Clear search
+                </button>
+              }
+            />
           ) : (
             <>
-              {/* Date-grouped video grid */}
               {groups.map((group) => (
-                <div key={group.date} className="mb-10">
-                  <div className="flex items-center gap-3 mb-4">
-                    <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
-                    <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{group.label}</span>
-                    <div className="flex-1 h-px bg-zinc-100" />
-                    <span className="text-xs text-zinc-400">{group.items.length} video{group.items.length !== 1 ? "s" : ""}</span>
+                <section key={group.date} className="mb-9 last:mb-0">
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-gradient-to-br from-accent to-accent-2" />
+                    <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">
+                      {group.label}
+                    </h2>
+                    <div className="h-px flex-1 bg-line" />
+                    <span className="shrink-0 text-[11px] tabular-nums text-subtle">
+                      {group.items.length} video{group.items.length !== 1 ? "s" : ""}
+                    </span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-5 justify-items-center">
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4 sm:gap-5">
                     {group.items.map((video) => (
                       <VideoDataCard
                         key={video.id}
@@ -349,39 +532,57 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
                       />
                     ))}
                   </div>
-                </div>
+                </section>
               ))}
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 mt-6">
+                <nav
+                  aria-label="Pagination"
+                  className="mt-8 flex flex-wrap items-center justify-center gap-1.5"
+                >
                   <button
-                    onClick={() => { setPage((p) => Math.max(1, p - 1)); window.scrollTo(0, 0); }}
-                    disabled={page === 1}
-                    className="px-4 py-2 rounded-lg border border-zinc-200 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >← Prev</button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => { setPage(p); window.scrollTo(0, 0); }}
-                      className={`w-9 h-9 rounded-lg text-sm font-medium transition-colors ${
-                        p === page ? "bg-blue-600 text-white shadow-sm" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-                      }`}
-                    >{p}</button>
-                  ))}
+                    onClick={() => goToPage(Math.max(1, safePage - 1))}
+                    disabled={safePage === 1}
+                    className="rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    ← Prev
+                  </button>
+                  {pageWindow(safePage, totalPages).map((p, i) =>
+                    p === "gap" ? (
+                      <span key={`gap-${i}`} className="px-1 text-sm text-subtle" aria-hidden>
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => goToPage(p)}
+                        aria-current={p === safePage ? "page" : undefined}
+                        className={`h-9 w-9 rounded-lg text-sm font-medium tabular-nums transition-all ${
+                          p === safePage
+                            ? "bg-gradient-to-br from-accent to-accent-2 text-white shadow-md shadow-accent/25"
+                            : "border border-line bg-surface text-muted hover:bg-surface-2 hover:text-fg"
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
                   <button
-                    onClick={() => { setPage((p) => Math.min(totalPages, p + 1)); window.scrollTo(0, 0); }}
-                    disabled={page === totalPages}
-                    className="px-4 py-2 rounded-lg border border-zinc-200 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >Next →</button>
-                </div>
+                    onClick={() => goToPage(Math.min(totalPages, safePage + 1))}
+                    disabled={safePage === totalPages}
+                    className="rounded-lg border border-line bg-surface px-3.5 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    Next →
+                  </button>
+                </nav>
               )}
             </>
           )}
         </div>
       </main>
 
-      {/* Popups */}
+      {/* ================= Popups ================= */}
       {showPopup && (
         <ChatgptUrlCheckerPopUpCard
           folderId={folderId}
@@ -404,13 +605,78 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       )}
       {showDownloadAllConfirm && (
         <ConformationMessagePopUp
-          title={`Download ${videosToDownload.length} video${videosToDownload.length !== 1 ? "s" : ""}?`}
+          title={`Download ${videosToDownload.length} video${
+            videosToDownload.length !== 1 ? "s" : ""
+          }?`}
           message={`This will queue all ${videosToDownload.length} video(s) on this page for download, one at a time. Videos already downloaded will be skipped.`}
           confirmLabel="Start Downloading"
           onConfirm={handleDownloadAllConfirmed}
           onCancel={() => setShowDownloadAllConfirm(false)}
         />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+const HEADER_TONES = {
+  neutral: "border-line bg-surface text-muted hover:bg-surface-2 hover:text-fg",
+  danger: "border-danger-line bg-surface text-danger hover:bg-danger-soft",
+  ok: "border-ok-line bg-ok-soft text-ok",
+} as const;
+
+/** Header action button — icon-only on narrow screens, icon + label from sm up. */
+function HeaderButton({
+  onClick,
+  label,
+  icon,
+  tone = "neutral",
+  disabled,
+  title,
+}: {
+  onClick: () => void;
+  label: string;
+  icon: React.ReactNode;
+  tone?: keyof typeof HEADER_TONES;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      aria-label={label}
+      className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${HEADER_TONES[tone]}`}
+    >
+      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        {icon}
+      </svg>
+      <span className="hidden md:inline">{label}</span>
+    </button>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  body,
+  action,
+}: {
+  icon: string;
+  title: string;
+  body: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-[320px] flex-col items-center justify-center px-4 text-center">
+      <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-line bg-surface-2 text-3xl">
+        {icon}
+      </div>
+      <p className="text-base font-semibold">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-muted">{body}</p>
+      {action}
     </div>
   );
 }

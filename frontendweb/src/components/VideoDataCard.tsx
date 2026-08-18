@@ -17,7 +17,7 @@ interface VideoData {
 }
 
 function formatBytes(bytes?: number): string {
-  if (!bytes) return "Size: Unknown";
+  if (!bytes) return "Unknown size";
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
@@ -26,16 +26,55 @@ function formatBytes(bytes?: number): string {
 function formatUploadDate(dateStr?: string): string {
   if (!dateStr) return "";
   const parts = dateStr.split("-");
-  if (parts.length === 3) {
-    return `${parts[2]}/${parts[1]}/${parts[0]}`;
-  }
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
   return dateStr;
 }
 
-export default function VideoDataCard({ video, onDelete }: { video: VideoData, onDelete: (id: string) => void }) {
+/** m:ss, or h:mm:ss once the video runs past an hour. */
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "--:--";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const ss = s.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/** Per-platform accent, as an OKLCH hue so both themes stay in gamut. */
+const PLATFORM_HUE: Record<string, number> = {
+  youtube: 25,
+  twitter: 250,
+  x: 250,
+  instagram: 340,
+  reddit: 45,
+  facebook: 255,
+  tiktok: 190,
+};
+
+function platformStyle(platform: string): React.CSSProperties {
+  const hue = PLATFORM_HUE[platform.toLowerCase()];
+  if (hue === undefined) return {};
+  return {
+    color: `oklch(from var(--fg) l c h)`,
+    background: `oklch(0.62 0.2 ${hue} / 0.14)`,
+    borderColor: `oklch(0.62 0.2 ${hue} / 0.35)`,
+    // Text picks up the platform hue directly; the soft fill behind it keeps
+    // contrast acceptable in both themes.
+    ["--platform-fg" as string]: `oklch(0.62 0.2 ${hue})`,
+  };
+}
+
+export default function VideoDataCard({
+  video,
+  onDelete,
+}: {
+  video: VideoData;
+  onDelete: (id: string) => void;
+}) {
   const { jobs, dbStatuses, addToQueue, cancelJob, removeJob } = useDownloadQueue();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showRedownloadConfirm, setShowRedownloadConfirm] = useState(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
 
   const job = jobs[video.id];
   const dbStatus = dbStatuses[video.id]; // persisted status from DB
@@ -50,11 +89,11 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
   const persistedCompleted = !job && dbStatus === "downloaded";
   const persistedFailed = !job && dbStatus === "failed";
   const persistedCancelled = !job && dbStatus === "cancelled";
-  // If it's pending in the DB but no active job exists, it means the tab was closed/crashed. Treat as fresh so they can start it again.
+  // If it's pending in the DB but no active job exists, the tab was closed or
+  // crashed mid-download. Treat as fresh so it can be started again.
   const isFresh = !job && (!dbStatus || dbStatus === "fresh" || dbStatus === "pending");
 
   const startDownload = () => addToQueue(video.id);
-  const cancelDownload = () => cancelJob(video.id);
   const dismissState = () => removeJob(video.id);
 
   const handleRedownload = () => {
@@ -62,21 +101,15 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
     addToQueue(video.id);
   };
 
-  const formatDuration = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
-
   const getPhaseText = () => {
     if (!job) return "";
-    if (isQueued) return "Waiting in queue...";
-    if (job.phase === "starting") return "Starting...";
-    if (job.phase === "video") return "Downloading video...";
-    if (job.phase === "audio") return "Downloading audio...";
-    if (job.phase === "merging") return "Merging...";
+    if (isQueued) return "Waiting in queue…";
+    if (job.phase === "starting") return "Starting…";
+    if (job.phase === "video") return "Downloading video…";
+    if (job.phase === "audio") return "Downloading audio…";
+    if (job.phase === "merging") return "Merging…";
     if (job.phase === "done") return "Done!";
-    return "Downloading...";
+    return "Downloading…";
   };
 
   const getThumbnailUrl = () => {
@@ -89,195 +122,207 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
     return video.thumbnail;
   };
 
-  const getPlatformColors = (platform: string) => {
-    const p = platform.toLowerCase();
-    if (p === "youtube") return "bg-red-50 text-red-600 border-red-200";
-    if (p === "twitter" || p === "x") return "bg-zinc-900 text-white border-zinc-700";
-    if (p === "instagram") return "bg-fuchsia-50 text-fuchsia-600 border-fuchsia-200";
-    if (p === "reddit") return "bg-orange-50 text-orange-600 border-orange-200";
-    if (p === "facebook") return "bg-blue-50 text-blue-600 border-blue-200";
-    if (p === "tiktok") return "bg-black text-white border-black";
-    return "bg-zinc-100 text-zinc-600 border-zinc-200";
-  };
+  const showThumb = Boolean(video.thumbnail) && !thumbFailed;
 
   return (
     <>
-      <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col mx-auto w-full max-w-[260px] relative" style={{ minHeight: "300px" }}>
-        {/* Clickable overlay to open source URL */}
+      <article className="group card-glow flex h-full w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface/90 shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10">
+        {/* ---------- Thumbnail ---------- */}
         <a
           href={video.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="absolute inset-0 z-0"
           title="Open original video"
-        />
-
-        {/* Thumbnail */}
-        <div className="relative h-[148px] w-full bg-zinc-100 flex items-center justify-center shrink-0 pointer-events-none z-10">
-          {video.thumbnail ? (
-            <img src={getThumbnailUrl()} alt={video.title} className="w-full h-full object-cover" />
+          /* aspect-video reserves the exact box before the image loads, so a
+             slow thumbnail can't push the card body down. */
+          className="relative block aspect-video w-full shrink-0 overflow-hidden bg-surface-2"
+        >
+          {showThumb ? (
+            <img
+              src={getThumbnailUrl()}
+              alt=""
+              width={320}
+              height={180}
+              loading="lazy"
+              decoding="async"
+              onError={() => setThumbFailed(true)}
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
           ) : (
-            <span className="text-zinc-400 text-sm">No Thumbnail</span>
+            <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-surface-2 to-surface-3 text-xs font-medium text-subtle">
+              No thumbnail
+            </span>
           )}
-          <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
-            {formatDuration(video.duration_seconds)}
-          </div>
-        </div>
 
-        {/* Card body */}
-        <div className="p-3.5 flex flex-col flex-1 z-10 pointer-events-none">
-          {/* Title — always 2 lines, uniform height */}
-          <h3
-            className="font-semibold text-zinc-900 text-sm mb-2"
-            title={video.title}
-            style={{
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-              minHeight: "2.5rem",   // exactly 2 lines
-            }}
+          {/* Bottom scrim so the chips stay readable over bright frames */}
+          <span
+            aria-hidden
+            className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/65 to-transparent"
+          />
+
+          <span
+            className="absolute left-2 top-2 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm"
+            style={{ ...platformStyle(video.platform), color: "var(--platform-fg, var(--muted))" }}
           >
-            {video.title}
+            {video.platform}
+          </span>
+
+          <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white tabular-nums">
+            {formatDuration(video.duration_seconds)}
+          </span>
+        </a>
+
+        {/* ---------- Body ---------- */}
+        <div className="flex min-w-0 flex-1 flex-col p-3.5">
+          {/* Fixed 2-line box — long and short titles occupy the same height, so
+              every card in a row lines up and nothing reflows on load. */}
+          <h3 className="clamp-2 min-h-[2.5rem] text-sm font-semibold leading-tight">
+            <a
+              href={video.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={video.title}
+              className="transition-colors hover:text-accent"
+            >
+              {video.title}
+            </a>
           </h3>
 
-          {/* Platform badge + date + size */}
-          <div className="flex items-center justify-between mb-3">
-            <span className={`uppercase tracking-wider font-semibold text-[9px] border px-2 py-0.5 rounded-full ${getPlatformColors(video.platform)}`}>
-              {video.platform}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-md border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">
+              {formatBytes(job?.actualSize || video.file_size_bytes)}
             </span>
-            <div className="flex gap-1.5 items-center">
-              <span className="text-[10px] text-zinc-500 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
-                {formatBytes(job?.actualSize || video.file_size_bytes)}
+            {video.upload_date && (
+              <span className="rounded-md border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-subtle">
+                {formatUploadDate(video.upload_date)}
               </span>
-              {video.upload_date && (
-                <span className="text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded border border-zinc-100">
-                  {formatUploadDate(video.upload_date)}
-                </span>
-              )}
-            </div>
+            )}
           </div>
 
-          {/* Bottom action area — always at bottom */}
-          <div className="mt-auto pointer-events-auto">
-
-            {/* ── Session: Completed ── */}
+          {/* ---------- Action area ----------
+              Height-locked and bottom-aligned. The states below have different
+              natural heights (a progress block is taller than a button row);
+              without the lock the card would resize every time a download
+              started or finished, shifting every card after it in the grid. */}
+          <div className="mt-3 flex min-h-[42px] items-end">
+            {/* Session: completed */}
             {isCompleted && (
-              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
-                <span className="text-xs text-green-700 font-medium flex-1">Downloaded!</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline mr-1">Re-download</button>
-                <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs mr-1">✕</button>
-                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
-              </div>
+              <StatusRow tone="ok" label="Downloaded!">
+                <TextButton onClick={() => setShowRedownloadConfirm(true)}>Again</TextButton>
+                <IconButton onClick={dismissState} label="Dismiss">
+                  <CloseIcon />
+                </IconButton>
+                <IconButton onClick={() => setShowDeleteConfirm(true)} label="Delete video" danger>
+                  <TrashIcon />
+                </IconButton>
+              </StatusRow>
             )}
 
-            {/* ── Session: Failed ── */}
+            {/* Session: failed */}
             {isError && (
-              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                <svg className="w-4 h-4 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-red-700 font-medium">Download Failed</p>
-                  <p className="text-[10px] text-red-500 truncate" title={job.error}>{job.error || "Unknown error"}</p>
-                </div>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline shrink-0 mr-1">Retry</button>
-                <button onClick={dismissState} className="text-zinc-400 hover:text-zinc-600 text-xs shrink-0 mr-1">✕</button>
-                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 shrink-0 transition-colors" title="Delete card">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
-              </div>
+              <StatusRow tone="danger" label="Failed" hint={job.error || "Unknown error"}>
+                <TextButton onClick={() => setShowRedownloadConfirm(true)}>Retry</TextButton>
+                <IconButton onClick={dismissState} label="Dismiss">
+                  <CloseIcon />
+                </IconButton>
+                <IconButton onClick={() => setShowDeleteConfirm(true)} label="Delete video" danger>
+                  <TrashIcon />
+                </IconButton>
+              </StatusRow>
             )}
 
-            {/* ── Session: Cancelled ── */}
+            {/* Session: cancelled */}
             {isCancelled && (
-              <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2">
-                <span className="text-xs text-zinc-500 flex-1">Cancelled</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-xs text-blue-600 hover:underline font-medium mr-1">Retry</button>
-                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
-              </div>
+              <StatusRow tone="neutral" label="Cancelled">
+                <TextButton onClick={() => setShowRedownloadConfirm(true)}>Retry</TextButton>
+                <IconButton onClick={() => setShowDeleteConfirm(true)} label="Delete video" danger>
+                  <TrashIcon />
+                </IconButton>
+              </StatusRow>
             )}
 
-            {/* ── Persistent: Downloaded (from previous session) ── */}
+            {/* Persisted from an earlier session */}
             {persistedCompleted && (
-              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
-                <span className="text-xs text-green-700 font-medium flex-1">Already Downloaded</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline mr-1">Re-download</button>
-                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
-              </div>
+              <StatusRow tone="ok" label="Already downloaded">
+                <TextButton onClick={() => setShowRedownloadConfirm(true)}>Again</TextButton>
+                <IconButton onClick={() => setShowDeleteConfirm(true)} label="Delete video" danger>
+                  <TrashIcon />
+                </IconButton>
+              </StatusRow>
             )}
-
-            {/* ── Persistent: Failed (from previous session) ── */}
             {persistedFailed && (
-              <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                <span className="text-xs text-red-700 font-medium flex-1">Previously Failed</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline mr-1">Retry</button>
-                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
-              </div>
+              <StatusRow tone="danger" label="Previously failed">
+                <TextButton onClick={() => setShowRedownloadConfirm(true)}>Retry</TextButton>
+                <IconButton onClick={() => setShowDeleteConfirm(true)} label="Delete video" danger>
+                  <TrashIcon />
+                </IconButton>
+              </StatusRow>
             )}
-
-            {/* ── Persistent: Cancelled (from previous session) ── */}
             {persistedCancelled && (
-              <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2">
-                <span className="text-xs text-zinc-500 flex-1">Previously Cancelled</span>
-                <button onClick={() => setShowRedownloadConfirm(true)} className="text-[10px] text-blue-600 hover:underline font-medium mr-1">Download</button>
-                <button onClick={() => setShowDeleteConfirm(true)} className="text-zinc-400 hover:text-red-500 transition-colors" title="Delete card">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
-              </div>
+              <StatusRow tone="neutral" label="Previously cancelled">
+                <TextButton onClick={() => setShowRedownloadConfirm(true)}>Download</TextButton>
+                <IconButton onClick={() => setShowDeleteConfirm(true)} label="Delete video" danger>
+                  <TrashIcon />
+                </IconButton>
+              </StatusRow>
             )}
 
-            {/* ── Downloading / Queued ── */}
+            {/* Downloading / queued */}
             {isDownloading && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center text-[10px]">
-                  <span className="text-blue-600 font-medium truncate pr-2">{getPhaseText()}</span>
-                  <span className="text-zinc-500 shrink-0">{job.progress.toFixed(0)}%</span>
+              <div className="w-full space-y-1.5">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="truncate pr-2 font-medium text-accent">{getPhaseText()}</span>
+                  <span className="shrink-0 font-mono tabular-nums text-muted">
+                    {job.progress.toFixed(0)}%
+                  </span>
                 </div>
-                <div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 transition-all duration-150 ease-out" style={{ width: `${job.progress}%` }} />
+                <div
+                  className="h-1.5 overflow-hidden rounded-full bg-surface-3"
+                  role="progressbar"
+                  aria-valuenow={Math.round(job.progress)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`Download progress for ${video.title}`}
+                >
+                  {/* scaleX, not width — animating width re-lays-out the row on
+                      every progress tick. */}
+                  <div
+                    className="h-full origin-left rounded-full bg-gradient-to-r from-accent to-accent-2 transition-transform duration-200 ease-out"
+                    style={{ transform: `scaleX(${Math.max(0, Math.min(100, job.progress)) / 100})` }}
+                  />
                 </div>
                 <div className="flex justify-end">
-                  <button onClick={cancelDownload} className="text-[10px] text-red-500 hover:text-red-700 font-medium px-2 py-0.5 hover:bg-red-50 rounded transition-colors">
+                  <button
+                    onClick={() => cancelJob(video.id)}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-danger transition-colors hover:bg-danger-soft"
+                  >
                     Cancel
                   </button>
                 </div>
               </div>
             )}
 
-            {/* ── Fresh: never touched ── */}
+            {/* Fresh: never touched */}
             {isFresh && (
-              <div className="flex gap-2">
+              <div className="flex w-full gap-2">
                 <button
                   onClick={startDownload}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-accent to-accent-2 py-2 text-xs font-semibold text-white shadow-md shadow-accent/25 transition-all hover:shadow-lg hover:shadow-accent/35"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
                   Download
                 </button>
-                <button
-                  onClick={() => setShowDeleteConfirm(true)}
-                  className="p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors"
-                  title="Delete Video"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                </button>
+                <IconButton onClick={() => setShowDeleteConfirm(true)} label="Delete video" danger>
+                  <TrashIcon />
+                </IconButton>
               </div>
             )}
           </div>
         </div>
-      </div>
+      </article>
 
-      {/* Delete confirmation */}
       {showDeleteConfirm && (
         <ConformationMessagePopUp
           title="Delete Video?"
@@ -292,7 +337,6 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
         />
       )}
 
-      {/* Re-download confirmation */}
       {showRedownloadConfirm && (
         <ConformationMessagePopUp
           title="Download Again?"
@@ -306,3 +350,84 @@ export default function VideoDataCard({ video, onDelete }: { video: VideoData, o
   );
 }
 
+/* ------------------------------------------------------------------ *
+ * Small shared pieces — the six status states differ only in tone and
+ * which buttons they carry, so they share one row shell.
+ * ------------------------------------------------------------------ */
+
+const TONES = {
+  ok: "border-ok-line bg-ok-soft text-ok",
+  danger: "border-danger-line bg-danger-soft text-danger",
+  neutral: "border-line bg-surface-2 text-muted",
+} as const;
+
+function StatusRow({
+  tone,
+  label,
+  hint,
+  children,
+}: {
+  tone: keyof typeof TONES;
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`flex w-full items-center gap-1.5 rounded-lg border px-2.5 py-1.5 ${TONES[tone]}`}>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] font-semibold">{label}</p>
+        {hint && <p className="truncate text-[9.5px] opacity-75" title={hint}>{hint}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function TextButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="shrink-0 rounded px-1 text-[10px] font-semibold underline-offset-2 hover:underline"
+    >
+      {children}
+    </button>
+  );
+}
+
+function IconButton({
+  onClick,
+  label,
+  danger,
+  children,
+}: {
+  onClick: () => void;
+  label: string;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={`shrink-0 rounded-lg p-1.5 text-subtle transition-colors ${
+        danger ? "hover:bg-danger-soft hover:text-danger" : "hover:bg-surface-3 hover:text-fg"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);

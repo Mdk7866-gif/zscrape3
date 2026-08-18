@@ -5,6 +5,7 @@ import React, {
   useCallback, useRef, ReactNode,
 } from "react";
 import { apiFetch, apiUrl } from "@/lib/api";
+import AlertMessagePopUp from "@/components/AlertMessagePopUp";
 
 export type DownloadStatus = "fresh" | "pending" | "downloaded" | "cancelled" | "failed";
 
@@ -51,6 +52,9 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<Record<string, DownloadJob>>({});
   const [dbStatuses, setDbStatuses] = useState<Record<string, DownloadStatus>>({});
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
+  // Replaces a native window.alert(): browser modals block the whole tab and
+  // look nothing like the rest of the app's popups.
+  const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
   const dirHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
   const downloadedJobIds = useRef<Set<string>>(new Set());
   const startingRef = useRef<Set<string>>(new Set());
@@ -93,15 +97,22 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   // ── Directory picker ───────────────────────────────────────────────────────
   const pickDownloadDir = useCallback(async () => {
     if (!window.showDirectoryPicker) {
-      alert("Your browser doesn't support folder selection. Files will go to your default Downloads folder.");
+      setAlert({
+        title: "Folder selection unavailable",
+        message:
+          "This browser doesn't support choosing a save folder. Downloads will go to your browser's default Downloads folder instead.",
+      });
       return;
     }
     try {
       const handle = await window.showDirectoryPicker({ mode: "readwrite" });
       dirHandleRef.current = handle;
       setDownloadDir(handle.name);
-    } catch (e: any) {
-      if (e.name !== "AbortError") console.error("Directory picker error", e);
+    } catch (e) {
+      // AbortError just means the user closed the picker — not worth logging.
+      if (!(e instanceof DOMException) || e.name !== "AbortError") {
+        console.error("Directory picker error", e);
+      }
     }
   }, []);
 
@@ -304,6 +315,14 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
       downloadDir, pickDownloadDir,
     }}>
       {children}
+      {alert && (
+        <AlertMessagePopUp
+          title={alert.title}
+          message={alert.message}
+          type="warning"
+          onClose={() => setAlert(null)}
+        />
+      )}
     </DownloadQueueContext.Provider>
   );
 }

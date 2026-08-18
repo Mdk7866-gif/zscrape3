@@ -1,20 +1,388 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Dark mode is class-driven, not media-driven, so the toggle in the navbar can
+   override the OS preference. ThemeProvider puts `.dark` on <html>.
+   (Tailwind v4 defaults to `prefers-color-scheme`, so this override is required.)
+--------------------------------------------------------------------------- */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Semantic color tokens.
+
+   Components reference these (bg-surface, text-muted, border-line, …) and never
+   raw palette colors like `zinc-200`. That's what makes dark mode a single
+   variable swap here instead of a `dark:` variant on every element.
+--------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces, back to front */
+  --bg: oklch(0.985 0.004 265);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.972 0.005 265);
+  --surface-3: oklch(0.945 0.007 265);
+
+  /* Text, most to least prominent */
+  --fg: oklch(0.22 0.021 265);
+  --muted: oklch(0.505 0.018 265);
+  --subtle: oklch(0.64 0.014 265);
+
+  /* Borders */
+  --line: oklch(0.915 0.006 265);
+  --line-strong: oklch(0.855 0.009 265);
+
+  /* Brand accent (indigo) + secondary (violet) for gradients */
+  --accent: oklch(0.545 0.215 269);
+  --accent-hover: oklch(0.49 0.215 269);
+  --accent-fg: oklch(1 0 0);
+  --accent-soft: oklch(0.955 0.028 269);
+  --accent-line: oklch(0.885 0.06 269);
+  --accent-2: oklch(0.585 0.225 305);
+  --accent-3: oklch(0.66 0.16 215);
+
+  /* Status */
+  --ok: oklch(0.52 0.14 156);
+  --ok-soft: oklch(0.955 0.04 156);
+  --ok-line: oklch(0.875 0.08 156);
+  --warn: oklch(0.56 0.14 75);
+  --warn-soft: oklch(0.965 0.05 85);
+  --warn-line: oklch(0.885 0.09 82);
+  --danger: oklch(0.545 0.205 22);
+  --danger-soft: oklch(0.96 0.03 22);
+  --danger-line: oklch(0.885 0.07 22);
+
+  /* Effects */
+  --ring: oklch(0.545 0.215 269 / 0.35);
+  --shadow-color: 265 25% 20%;
+  --glow-1: oklch(0.545 0.215 269 / 0.16);
+  --glow-2: oklch(0.585 0.225 305 / 0.14);
+  --glow-3: oklch(0.66 0.16 215 / 0.13);
+  --grid-line: oklch(0.22 0.02 265 / 0.045);
+
+  color-scheme: light;
+}
+
+.dark {
+  --bg: oklch(0.166 0.013 268);
+  --surface: oklch(0.207 0.016 268);
+  --surface-2: oklch(0.248 0.018 268);
+  --surface-3: oklch(0.292 0.02 268);
+
+  --fg: oklch(0.972 0.005 268);
+  --muted: oklch(0.735 0.016 268);
+  --subtle: oklch(0.6 0.017 268);
+
+  --line: oklch(0.305 0.018 268);
+  --line-strong: oklch(0.385 0.022 268);
+
+  --accent: oklch(0.685 0.175 269);
+  --accent-hover: oklch(0.745 0.16 269);
+  --accent-fg: oklch(0.16 0.03 269);
+  --accent-soft: oklch(0.285 0.075 269);
+  --accent-line: oklch(0.395 0.11 269);
+  --accent-2: oklch(0.71 0.18 305);
+  --accent-3: oklch(0.76 0.13 215);
+
+  --ok: oklch(0.775 0.16 156);
+  --ok-soft: oklch(0.29 0.065 156);
+  --ok-line: oklch(0.4 0.09 156);
+  --warn: oklch(0.815 0.145 85);
+  --warn-soft: oklch(0.315 0.06 75);
+  --warn-line: oklch(0.42 0.085 78);
+  --danger: oklch(0.715 0.17 22);
+  --danger-soft: oklch(0.31 0.075 22);
+  --danger-line: oklch(0.42 0.11 22);
+
+  --ring: oklch(0.685 0.175 269 / 0.45);
+  --shadow-color: 268 45% 3%;
+  --glow-1: oklch(0.685 0.175 269 / 0.2);
+  --glow-2: oklch(0.71 0.18 305 / 0.17);
+  --glow-3: oklch(0.76 0.13 215 / 0.14);
+  --grid-line: oklch(0.98 0.01 268 / 0.05);
+
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-accent-2: var(--accent-2);
+  --color-accent-3: var(--accent-3);
+
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-line);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-drift: drift 18s ease-in-out infinite;
+  --animate-shimmer: shimmer 2.2s linear infinite;
+  --animate-marquee: marquee 38s linear infinite;
+  --animate-sheen: sheen 4.5s ease-in-out infinite;
+  --animate-pop-in: pop-in 0.22s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  --animate-fade-in: fade-in 0.2s ease-out both;
+  --animate-rise: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-beam: beam 3s ease-in-out infinite;
+  --animate-slide-in-left: slide-in-left 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33% { transform: translate3d(4%, -6%, 0) scale(1.08); }
+  66% { transform: translate3d(-5%, 4%, 0) scale(0.95); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes sheen {
+  0%, 100% { opacity: 0.35; transform: translateX(-30%); }
+  50% { opacity: 0.85; transform: translateX(30%); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes beam {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.7; }
+}
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+/* Progress bars animate via scaleX, never width — width would re-layout the row
+   on every frame. The element's `transform` style sets the final value; this
+   keyframe just plays it in from empty. */
+@keyframes progress-fill {
+  from { transform: scaleX(0); }
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+html {
+  /* Reserve the scrollbar track at all times. Without this, a page that grows
+     past the viewport height gains a scrollbar and every centered element jumps
+     sideways — a layout shift on nearly every route. */
+  scrollbar-gutter: stable;
+  -webkit-text-size-adjust: 100%;
+}
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  /* Was hardcoded to Arial, which meant the Geist webfont was downloaded on
+     every page load and then never used. */
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Soften the light/dark flip. Deliberately limited to paint-only properties —
+   never transform or anything layout-affecting — and left at low specificity so
+   any Tailwind `transition-*` utility on an element still wins outright. */
+body,
+body * {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 180ms;
+  transition-timing-function: ease;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Scrollbars, themed */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 3px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--subtle);
+}
+
+/* ---------------------------------------------------------------------------
+   Utilities
+--------------------------------------------------------------------------- */
+
+/* Scroll-reveal. Elements start hidden and are revealed by the Reveal
+   component's IntersectionObserver. `.no-js-reveal` guards against content
+   staying invisible if JS never runs. */
+@utility reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+[data-revealed="true"] {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* Gradient text used for hero emphasis. */
+@utility text-gradient {
+  background-image: linear-gradient(
+    100deg,
+    var(--accent) 0%,
+    var(--accent-2) 45%,
+    var(--accent-3) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 6s linear infinite;
+}
+
+/* Frosted panel over the aurora background. */
+@utility glass {
+  background: color-mix(in oklab, var(--surface) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+}
+
+/* Card with a gradient hairline border that lights up on hover. */
+@utility card-glow {
+  position: relative;
+  isolation: isolate;
+}
+.card-glow::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(140deg, var(--accent), var(--accent-2), transparent 60%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+.card-glow:hover::before {
+  opacity: 1;
+}
+
+/* Loading placeholder — pairs with fixed-size skeleton boxes to keep CLS at 0. */
+@utility skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* Two-line clamp for card titles — locks the box height so cards in a grid all
+   line up and nothing reflows when a long title wraps. */
+@utility clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@utility clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Faint blueprint grid for hero/section backdrops. */
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+/* Edge-fade for marquees and grids that run off-canvas. */
+@utility mask-fade-x {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Accessibility: honor reduced-motion by flattening every decorative animation.
+--------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
 }
