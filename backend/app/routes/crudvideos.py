@@ -83,6 +83,18 @@ def bulk_upload_videos(request: BulkVideoUploadRequest):
         duplicate_count = 0
         failed_count = 0
 
+        # Preload URLs already recorded as failed for this folder so retries don't create duplicates
+        try:
+            existing_failed_res = (
+                supabase.table("failed_save_urls")
+                .select("url")
+                .eq("folder_id", str(request.folder_id))
+                .execute()
+            )
+            existing_failed_urls = {row["url"] for row in (existing_failed_res.data or [])}
+        except Exception:
+            existing_failed_urls = set()
+
         def fetch_meta(u: str) -> tuple[str, dict | None]:
             return u, extract_video_metadata(u)
 
@@ -95,13 +107,15 @@ def bulk_upload_videos(request: BulkVideoUploadRequest):
                 processed += 1
 
                 if metadata is None:
-                    try:
-                        supabase.table("failed_save_urls").insert({
-                            "folder_id": str(request.folder_id),
-                            "url": raw_url,
-                        }).execute()
-                    except Exception:
-                        pass
+                    if raw_url not in existing_failed_urls:
+                        try:
+                            supabase.table("failed_save_urls").insert({
+                                "folder_id": str(request.folder_id),
+                                "url": raw_url,
+                            }).execute()
+                            existing_failed_urls.add(raw_url)
+                        except Exception:
+                            pass
                     failed_count += 1
                     yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
                     continue
