@@ -1,4 +1,7 @@
+import json
 import logging
+import shutil
+import subprocess
 import urllib.request
 import urllib.error
 
@@ -10,6 +13,10 @@ from app.ytdlp_common import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Ships with the ffmpeg install yt-dlp's remuxer already requires (and with the
+# `ffmpeg` apt package in backend/Dockerfile), so this is not a new dependency.
+_FFPROBE = shutil.which("ffprobe")
 
 # Common User-Agent to avoid bot detection
 _USER_AGENT = (
@@ -143,11 +150,16 @@ def extract_video_metadata(url: str) -> dict | None:
             if sorted_thumbs:
                 thumbnail = sorted_thumbs[0]["url"]
 
-        duration = info_dict.get("duration") or _derive_duration_from_fragments(info_dict)
+        duration = (
+            info_dict.get("duration")
+            or _derive_duration_from_fragments(info_dict)
+            or _probe_duration_with_ffprobe(info_dict)
+        )
 
         return {
             "title": info_dict.get("title") or "Unknown Title",
-            "duration_seconds": int(duration or 0),
+            # round, not truncate: a 4.97s reel is 0:05, not 0:04.
+            "duration_seconds": round(duration or 0),
             "platform": platform if platform != "unknown" else info_dict.get("extractor_key", "unknown").lower(),
             "thumbnail": thumbnail,
             "url": url,
@@ -161,19 +173,14 @@ def extract_video_metadata(url: str) -> dict | None:
 
 def _derive_duration_from_fragments(info_dict: dict) -> float | None:
     """
-    Fallback for when yt-dlp's top-level `duration` is missing.
+    First fallback for when yt-dlp's top-level `duration` is missing: sum the
+    per-fragment durations yt-dlp already parsed out of a segmented manifest.
 
-    Instagram's extractor (yt_dlp/extractor/instagram.py, InstagramBaseIE
-    ._extract_product_media) sources `duration` from a single field in
-    Instagram's own API/GraphQL response (`video_duration`). When that field
-    is absent — seen in practice on some Reels even though a real DASH
-    manifest is present — yt-dlp has no fallback of its own: it parses the
-    manifest into per-fragment `duration`s (real seconds, used to fetch each
-    segment) but never sums them into the top-level `duration` field.
-
-    Recovering it here is safe for any platform: it only ever fires when
-    `duration` is already missing, and only reads data yt-dlp already
-    extracted (no extra network calls).
+    Free (no network) but only applies to manifests that actually enumerate
+    fragments — SegmentTemplate/SegmentList DASH and HLS. It does NOT cover
+    Instagram, whose DASH uses SegmentBase (one byte-ranged file per
+    representation), so its formats carry no `fragments` at all; that case
+    falls through to _probe_duration_with_ffprobe().
     """
     best_total = 0.0
     for fmt in info_dict.get("formats") or []:
@@ -187,6 +194,53 @@ def _derive_duration_from_fragments(info_dict: dict) -> float | None:
         if total > best_total:
             best_total = total
     return best_total or None
+
+
+def _probe_duration_with_ffprobe(info_dict: dict) -> float | None:
+    """
+    Last-resort duration recovery: read it from the media file's own header.
+
+    Instagram's extractor sources `duration` from one field of Instagram's API
+    response (`video_duration`), and for some Reels that field is simply absent.
+    Nothing else in the extracted info carries it either — the DASH formats have
+    no `fragments` to sum (SegmentBase), no `filesize`, and the manifest's
+    `mediaPresentationDuration` is parsed by yt-dlp but never exposed on the
+    format dicts. The container header is the only remaining source.
+
+    ffprobe range-reads just that header (~2s, a few hundred KB), never the whole
+    file. Only fires when the duration is otherwise unknown, so the cost is paid
+    only on the videos that would show "--:--".
+    """
+    if not _FFPROBE:
+        return None
+
+    url = info_dict.get("url") or next(
+        (f.get("url") for f in info_dict.get("requested_formats") or [] if f.get("url")),
+        None,
+    )
+    if not url:
+        return None
+
+    try:
+        proc = subprocess.run(
+            [
+                _FFPROBE, "-v", "error",
+                "-user_agent", _USER_AGENT,
+                "-show_entries", "format=duration",
+                "-of", "json", url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=25,
+        )
+        if proc.returncode != 0:
+            logger.warning(f"ffprobe could not read duration (rc={proc.returncode}): {proc.stderr.strip()[:200]}")
+            return None
+        # Missing/unknown duration comes back as "N/A", which float() rejects.
+        return float(json.loads(proc.stdout)["format"]["duration"]) or None
+    except Exception as e:
+        logger.warning(f"ffprobe duration probe failed: {e}")
+        return None
 
 
 def _parse_upload_date(raw: str | None) -> str | None:
