@@ -35,6 +35,8 @@ Backend needs a `backend/.env` (see `backend/env.example` for the required keys:
    ```
    `bgutil-provider/` at the repo root is a local install of https://github.com/Brainicism/bgutil-ytdlp-pot-provider (gitignored — not committed). To set it up from scratch: clone the repo at the tag matching the `bgutil-ytdlp-pot-provider` pin in `pyproject.toml` (currently `1.3.1`), run `npm install && npx tsc` inside its `server/` folder, then copy `build/`, `node_modules/`, and `package.json` into `bgutil-provider/` at the repo root.
 
+   Don't trust its startup log alone — it can print a normal-looking `Started POT server ... on address 0.0.0.0:4416` while having actually bound only `[::]:4416` (IPv6), leaving it unreachable at `127.0.0.1` (seen when a stale process was already holding the IPv6 socket). Confirm with `curl http://127.0.0.1:4416/ping` (expect `200`) before trusting downloads will get full quality — the symptom otherwise is downloads silently capping around 10MB with `HTTP Error 403: Forbidden` even though the provider "looks" up.
+
    For **Docker** (`docker-compose up`), this is already wired up as the `bgutil-provider` service — no extra steps needed. Keep its image tag in `docker-compose.yml` version-matched with the `bgutil-ytdlp-pot-provider` pin in `pyproject.toml` — the plugin and provider must agree.
 
 **Instagram/Facebook extraction needs `curl_cffi`** (pinned `>=0.13,<0.16` — yt-dlp only supports specific version ranges, checked at import time). Instagram's extractor requires browser-TLS impersonation to avoid a 403; without `curl_cffi` installed it silently falls back to a plain request and gets blocked.
@@ -63,6 +65,8 @@ Only real UI dependency beyond Next/React/Tailwind is `react-icons` (platform br
 ### Docker
 
 `docker-compose.yml` at the repo root builds/runs both services (backend on 8000, frontend on 3000, sharing `zscrape3-network`). Backend mounts `./backend/downloads` and reads `./backend/.env`.
+
+The frontend Dockerfile builds from `node:20-alpine` and runs `npm ci`, which requires `frontendweb/package-lock.json` to be byte-exact in sync with `package.json`. If the lockfile was last regenerated with a different (usually newer) local npm version, `npm ci` fails with `EUSAGE` / "Missing: ... from lock file" — commonly hitting `@emnapi/runtime`/`@emnapi/core`, optional wasm fallback deps of sharp and lightningcss that different npm versions resolve into the lockfile differently. Fix by regenerating the lockfile inside the same image the Dockerfile builds from, not locally: `docker run --rm -v "$PWD/frontendweb":/app -w /app node:20-alpine npm install --package-lock-only` (on Windows Git Bash, prefix with `MSYS_NO_PATHCONV=1` or the `/app` mount path gets mangled).
 
 ## Architecture
 

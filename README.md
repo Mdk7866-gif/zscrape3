@@ -12,7 +12,7 @@ zscrape3/
 ├── CLAUDE.md                    — architecture & command reference (start here for dev setup)
 ├── docker-compose.yml           — backend + frontend + PO-token provider services
 ├── zscrape3_database.sql        — Supabase schema (SQL)
-├── docker_commands.md           — build/run/push reference for the Docker images
+├── quickdockerpush.md           — build/push Docker images; run the 3 local-dev servers
 ├── website_setup_guide(v-2).pdf
 │
 ├── migrations/                  — hand-written SQL migrations, run manually in the

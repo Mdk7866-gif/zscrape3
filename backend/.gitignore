@@ -63,3 +63,8 @@ Thumbs.db
 # Docker
 # =========================
 *.tar
+
+# =========================
+# Real signed-in session cookies — never commit
+# =========================
+cookies.txt

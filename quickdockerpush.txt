@@ -1,6 +1,0 @@
-# Run from: c:\Users\ASUS\OneDrive\Desktop\zscrape3
-
-docker build -t mdk7866/zscrape3-backend:latest ./backend
-docker build -t mdk7866/zscrape3-frontend:latest ./frontendweb
-docker push mdk7866/zscrape3-backend:latest
-docker push mdk7866/zscrape3-frontend:latest
