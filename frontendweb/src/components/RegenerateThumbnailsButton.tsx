@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { apiFetch, asFriendlyError } from "@/lib/api";
 import { useAdmin } from "@/components/AdminContext";
@@ -43,6 +43,11 @@ export default function RegenerateThumbnailsButton() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Navigating away mid-run would otherwise leave the request streaming with
+  // nobody to receive it.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const refreshStatus = useCallback(async () => {
     if (!folderId) return;
@@ -75,16 +80,33 @@ export default function RegenerateThumbnailsButton() {
   const expired = current?.expired ?? 0;
   const total = current?.total ?? 0;
 
+  const handleCancel = () => {
+    // Aborting drops the connection, which the backend notices and uses to stop
+    // queueing further work. Videos already finished keep their new thumbnails —
+    // each one is written to the DB as it completes, not batched at the end.
+    abortRef.current?.abort();
+  };
+
   const handleClick = async () => {
     if (!folderId || running) return;
     setRunning(true);
     setProgress({ done: 0, total: expired });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Counted from the progress events rather than the final summary, because a
+    // cancelled run never receives a "complete" event — but the work it already
+    // did still stands and should be reported.
+    let updatedSoFar = 0;
+    let failedSoFar = 0;
 
     try {
       const res = await apiFetch("/video/regenerate-thumbnails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folder_id: folderId }),
+        signal: controller.signal,
       });
       if (res.status === 404) throw new Error("This folder is not available.");
       if (!res.ok) throw new Error("Could not regenerate thumbnails.");
@@ -93,7 +115,6 @@ export default function RegenerateThumbnailsButton() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let summary = { updated: 0, failed: 0 };
 
       // NDJSON: one JSON object per line, so a long run reports as it goes.
       // A chunk boundary can split a line, hence the retained buffer.
@@ -116,37 +137,59 @@ export default function RegenerateThumbnailsButton() {
             setProgress({ done: 0, total: event.total });
           } else if (event.type === "progress") {
             setProgress({ done: event.processed, total: event.total });
-          } else if (event.type === "complete") {
-            summary = { updated: event.updated, failed: event.failed };
+            if (event.status === "updated") updatedSoFar += 1;
+            else if (event.status === "failed") failedSoFar += 1;
           } else if (event.type === "error") {
             throw new Error(event.message);
           }
         }
       }
 
-      if (summary.updated > 0) {
-        window.dispatchEvent(new CustomEvent(THUMBNAILS_UPDATED_EVENT));
-      }
-
-      setAlert({
-        title: summary.updated > 0 ? "Thumbnails restored" : "Nothing to restore",
-        message:
-          summary.updated === 0 && summary.failed === 0
-            ? "All Instagram and Facebook thumbnails in this folder are already up to date."
-            : `Restored ${summary.updated} thumbnail${summary.updated === 1 ? "" : "s"}.` +
-              (summary.failed > 0
-                ? ` ${summary.failed} could not be recovered — those posts may have been deleted or made private.`
-                : ""),
-      });
-      await refreshStatus();
+      finish(updatedSoFar, failedSoFar, false);
     } catch (err) {
-      setAlert({
-        title: "Couldn't regenerate thumbnails",
-        message: asFriendlyError(err).message,
-      });
+      // A cancel is a normal outcome, not a failure — report what got done.
+      if (controller.signal.aborted) {
+        finish(updatedSoFar, failedSoFar, true);
+      } else {
+        setAlert({
+          title: "Couldn't regenerate thumbnails",
+          message: asFriendlyError(err).message,
+        });
+      }
     } finally {
+      abortRef.current = null;
       setRunning(false);
     }
+  };
+
+  /** Shared ending for both a completed and a cancelled run. */
+  const finish = (updated: number, failed: number, cancelled: boolean) => {
+    if (updated > 0) {
+      window.dispatchEvent(new CustomEvent(THUMBNAILS_UPDATED_EVENT));
+    }
+    void refreshStatus();
+
+    if (cancelled) {
+      setAlert({
+        title: "Stopped",
+        message:
+          updated > 0
+            ? `Stopped early. The ${updated} thumbnail${updated === 1 ? "" : "s"} already restored ${updated === 1 ? "is" : "are"} saved — the rest were left as they were.`
+            : "Stopped before any thumbnail finished. Nothing was changed.",
+      });
+      return;
+    }
+
+    setAlert({
+      title: updated > 0 ? "Thumbnails restored" : "Nothing to restore",
+      message:
+        updated === 0 && failed === 0
+          ? "All Instagram and Facebook thumbnails in this folder are already up to date."
+          : `Restored ${updated} thumbnail${updated === 1 ? "" : "s"}.` +
+            (failed > 0
+              ? ` ${failed} could not be recovered — those posts may have been deleted or made private.`
+              : ""),
+    });
   };
 
   // Nothing to offer: not on a folder page, or no Instagram/Facebook videos here.
@@ -176,6 +219,22 @@ export default function RegenerateThumbnailsButton() {
             : `Fix ${expired} thumbnail${expired === 1 ? "" : "s"}`}
         </span>
       </button>
+
+      {/* Only while running, so the navbar isn't carrying a dead control the
+          rest of the time. Sits outside the progress button because that one is
+          disabled mid-run and a disabled button can't receive the click. */}
+      {running && (
+        <button
+          onClick={handleCancel}
+          title="Stop regenerating — thumbnails already restored are kept"
+          aria-label="Stop regenerating thumbnails"
+          className="flex h-[34px] w-[34px] items-center justify-center rounded-lg border border-line bg-surface text-muted transition-colors hover:border-danger-line hover:bg-danger-soft hover:text-danger"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      )}
 
       {alert && (
         <AlertMessagePopUp

@@ -13,6 +13,7 @@
 .reddit.com	TRUE	/	TRUE	0	csrf_token	d26e2d08bd46cd5f0f39c70ffa3b6a5b
 .reddit.com	TRUE	/	TRUE	1850135390	csv	2
 .reddit.com	TRUE	/	TRUE	1850135389	edgebucket	N3VZqssi1cOOX0btwL
+.reddit.com	TRUE	/	TRUE	1787149240	session_tracker	ilehqmicdliaqbhoid.0.1787142042578.Z0FBQUFBQnFoWi1iZWwxZjZrWHRfYUIzLUF5MDl3ODFHbFlLMWFfcEhTeWliS2FTN19BN1RkUklwa2VHcjRBVkhRRVFKZHg3dlJmcjF6d25nWEVBdHo0YzFwRS1GcVhWd3hEb1luLUU4TXNsVkt0VnZGbEdfOWFrc0dfeGNJOU9TRnM2X216VEIyLXg
 www.reddit.com	FALSE	/	FALSE	1811699215	reddit_supported_media_codecs	video/avc%2Cvideo/vp9
 www.reddit.com	FALSE	/	FALSE	1805642673	eu_cookie	{%22opted%22:true%2C%22nonessential%22:true}
 www.reddit.com	FALSE	/	TRUE	1795158490	subreddit_sort	ASlU4wfzVwoHlCtdB4zKThM=
@@ -37,6 +38,5 @@ reddit.com	FALSE	/	FALSE	0	_options	%7B%22pref_gated_sr_optin%22%3A%20true%7D
 .youtube.com	TRUE	/	TRUE	1802616525	__Secure-ROLLOUT_TOKEN	CMHx7uHMpZqkbBCzjpGy5oyOAxjF9paStqqWAw%3D%3D
 .youtube.com	TRUE	/	TRUE	1850137283	__Secure-YT_TVFAS	t=496092&s=2
 .youtube.com	TRUE	/	TRUE	1802617283	DEVICE_INFO	ChxOelkzTlRNNE5qazBPREUxTWpVeU5UQXlOdz09EMPnkdQGGMPnkdQG
-.youtube.com	TRUE	/	TRUE	1787074166	GPS	1
 .youtube.com	TRUE	/	TRUE	0	YSC	wj_ob0NWEvw
 .youtube.com	TRUE	/tv	TRUE	1819897283	__Secure-YT_DERP	CL_2ot6tBg%3D%3D

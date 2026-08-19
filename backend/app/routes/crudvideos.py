@@ -294,7 +294,12 @@ def regenerate_thumbnails(request: RegenerateThumbnailsRequest, admin: AdminFlag
         failed = 0
         processed = 0
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # Deliberately not a `with` block: its __exit__ calls shutdown(wait=True),
+        # which on client disconnect would keep working through every queued video
+        # — minutes of extra Instagram traffic for a run the user just cancelled.
+        # The finally below cancels what hasn't started instead.
+        executor = ThreadPoolExecutor(max_workers=5)
+        try:
             futures = [executor.submit(regenerate, v) for v in targets]
 
             for future in as_completed(futures):
@@ -323,6 +328,20 @@ def regenerate_thumbnails(request: RegenerateThumbnailsRequest, admin: AdminFlag
                     logger.error(f"Could not update thumbnail for video {video['id']}: {e}")
                     failed += 1
                     yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
+        except GeneratorExit:
+            # The client disconnected — cancelled from the UI, or navigated away.
+            # Videos already finished keep their new thumbnails (each is written
+            # as it completes), so there is nothing to roll back.
+            logger.info(
+                f"Thumbnail regeneration cancelled for folder {request.folder_id} "
+                f"after {processed}/{total} ({updated} updated)"
+            )
+            raise
+        finally:
+            # cancel_futures drops everything not yet started; in-flight work
+            # (at most max_workers) is left to finish rather than abandoned
+            # mid-upload. wait=False so cancelling returns immediately.
+            executor.shutdown(wait=False, cancel_futures=True)
 
         yield json.dumps({"type": "complete", "updated": updated, "failed": failed, "total": total}) + "\n"
 
