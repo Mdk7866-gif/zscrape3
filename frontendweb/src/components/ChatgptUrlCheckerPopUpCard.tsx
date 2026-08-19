@@ -2,7 +2,7 @@
 
 import { useState, ReactNode } from "react";
 import AlertMessagePopUp from "@/components/AlertMessagePopUp";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, asFriendlyError } from "@/lib/api";
 import { useModal } from "@/lib/useModal";
 
 interface ChatgptUrlCheckerPopUpCardProps {
@@ -94,7 +94,7 @@ export default function ChatgptUrlCheckerPopUpCard({
 
       setStep(2);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      setError(asFriendlyError(err).message);
     } finally {
       setLoading(false);
       setStatusText("");
@@ -177,7 +177,7 @@ export default function ChatgptUrlCheckerPopUpCard({
 
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      setError(asFriendlyError(err).message);
     } finally {
       setLoading(false);
       setStatusText("");

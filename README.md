@@ -27,6 +27,8 @@ zscrape3/
 │   │   │                                            visibility guards (404, not 403)
 │   │   ├── ytdlp_common.py                      — shared YouTube yt-dlp settings: JS runtime,
 │   │   │                                            PO-token provider, cookie-based rate-limit fallback
+│   │   ├── thumbnail_store.py                   — permanent Instagram/Facebook thumbnails in
+│   │   │                                            Supabase Storage (their CDN URLs expire in ~4.5 days)
 │   │   ├── routes/
 │   │   │   ├── router.py                        — combines all route modules into api_router
 │   │   │   ├── admin.py                         — /admin/*         — login / logout / session
@@ -63,7 +65,8 @@ zscrape3/
 │   │   │   │                                utilities (skeleton, clamp-2, reveal, bg-grid)
 │   │   │   └── folder/[id]/page.tsx     — per-folder video list/management
 │   │   ├── lib/
-│   │   │   ├── api.ts                   — apiFetch wrapper; attaches the admin token
+│   │   │   ├── api.ts                   — apiFetch wrapper; attaches the admin token and
+│   │   │   │                                turns "Failed to fetch" into an offline/server message
 │   │   │   ├── useModal.ts              — shared Escape/scroll-lock/focus-trap for popups
 │   │   │   ├── platforms.ts             — platform name/slug + react-icons brand logo + brand
 │   │   │   │                                color, and getPlatform() to look one up by slug
@@ -71,6 +74,8 @@ zscrape3/
 │   │   └── components/
 │   │       ├── DownloadQueueContext.tsx        — client-side download queue/orchestrator (app-wide)
 │   │       ├── VideoDataCard.tsx               — single video list item
+│   │       ├── RegenerateThumbnailsButton.tsx  — navbar action: restore expired Instagram/
+│   │       │                                     Facebook thumbnails (hidden when none are)
 │   │       ├── ChatgptUrlCheckerPopUpCard.tsx  — paste-text → extract URLs → bulk-upload flow
 │   │       ├── FailedUrlShowPopUpCard.tsx      — failed-URL review/retry popup
 │   │       ├── AdminContext.tsx                — admin session state (useAdmin hook)

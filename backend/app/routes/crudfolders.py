@@ -4,6 +4,7 @@ from typing import List
 from app.schemas.folder import FolderCreate, FolderOut, FolderDeleteResponse
 from app.supabase import supabase
 from app.admin_auth import AdminFlag, assert_folder_visible
+from app.thumbnail_store import delete_folder_thumbnails
 from postgrest.exceptions import APIError
 
 router = APIRouter(
@@ -44,6 +45,12 @@ def delete_folder(folder_id: UUID, admin: AdminFlag):
     # probed for existence.
     assert_folder_visible(folder_id, admin)
     try:
+        # Cached Instagram/Facebook thumbnails live outside Postgres, so nothing
+        # cascades them — drop them explicitly or they'd linger in storage
+        # forever. Keyed by the `{folder_id}/` path prefix, so this works even
+        # though the video rows are about to disappear.
+        delete_folder_thumbnails(str(folder_id))
+
         # Delete related records first to avoid foreign key constraints
         supabase.table("failed_save_urls").delete().eq("folder_id", str(folder_id)).execute()
         supabase.table("videos").delete().eq("folder_id", str(folder_id)).execute()

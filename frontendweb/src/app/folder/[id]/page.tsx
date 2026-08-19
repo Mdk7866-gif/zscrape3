@@ -8,6 +8,7 @@ import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
 import { useDownloadQueue } from "@/components/DownloadQueueContext";
 import { useAdmin } from "@/components/AdminContext";
 import { apiFetch } from "@/lib/api";
+import { THUMBNAILS_UPDATED_EVENT } from "@/components/RegenerateThumbnailsButton";
 
 const PAGE_SIZE = 50;
 
@@ -163,6 +164,16 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     loadFolderStatuses(folderId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderId, isAdmin, checking]);
+
+  // The regenerate action lives in the Navbar, outside this tree, so it signals
+  // completion by event rather than prop — refetch so the repaired thumbnails
+  // appear without a reload.
+  useEffect(() => {
+    const onThumbnailsUpdated = () => fetchVideos();
+    window.addEventListener(THUMBNAILS_UPDATED_EVENT, onThumbnailsUpdated);
+    return () => window.removeEventListener(THUMBNAILS_UPDATED_EVENT, onThumbnailsUpdated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderId]);
 
   const handleDelete = async (videoId: string) => {
     try {

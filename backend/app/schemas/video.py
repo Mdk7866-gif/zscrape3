@@ -9,6 +9,13 @@ class BulkVideoUploadRequest(BaseModel):
     urls: list[str] = Field(min_length=1)
 
 
+class RegenerateThumbnailsRequest(BaseModel):
+    folder_id: UUID
+    # Off by default so only genuinely expired thumbnails are re-extracted —
+    # every regeneration is a real Instagram API hit and they rate-limit hard.
+    force: bool = False
+
+
 class VideoOut(BaseModel):
     id: UUID
     folder_id: UUID

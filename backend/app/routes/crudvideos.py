@@ -1,4 +1,5 @@
 import logging
+import time
 from fastapi import APIRouter, HTTPException
 from uuid import UUID
 from datetime import date
@@ -10,9 +11,16 @@ from app.schemas.video import (
     VideoDeleteResponse,
     BulkVideoUploadRequest,
     BulkVideoUploadResponse,
-    BulkVideoItem
+    BulkVideoItem,
+    RegenerateThumbnailsRequest,
 )
 from app.routes.yt_dlpextractmetadataofvideo import extract_video_metadata
+from app.thumbnail_store import (
+    CACHED_PLATFORMS,
+    delete_video_thumbnail,
+    is_thumbnail_expired,
+    store_thumbnail,
+)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 router = APIRouter(prefix="/video", tags=["video"])
@@ -45,6 +53,12 @@ def delete_video(video_id: UUID, admin: AdminFlag):
         response = supabase.table("videos").delete().eq("id", str(video_id)).execute()
         if len(response.data) == 0:
             raise HTTPException(status_code=404, detail="Video not found")
+
+        # Deleting a single video never triggers the folder-level cleanup, so
+        # its cached thumbnail would be orphaned in storage forever without this.
+        deleted_row = response.data[0]
+        if deleted_row.get("folder_id"):
+            delete_video_thumbnail(str(deleted_row["folder_id"]), str(video_id))
         return VideoDeleteResponse(success=True, deleted=True, video_id=video_id)
     except HTTPException:
         raise
@@ -184,5 +198,132 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
                         yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
 
         yield json.dumps({"type": "complete", "saved": saved_count, "duplicates": duplicate_count, "failed": failed_count}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
+def _fetch_cached_platform_videos(folder_id: UUID) -> list[dict]:
+    """Instagram/Facebook rows in a folder — the only ones with expiring thumbnails."""
+    response = (
+        supabase.table("videos")
+        .select("id, url, thumbnail, platform")
+        .eq("folder_id", str(folder_id))
+        .in_("platform", list(CACHED_PLATFORMS))
+        .execute()
+    )
+    return response.data or []
+
+
+@router.get("/thumbnail-status")
+def thumbnail_status(folder_id: UUID, admin: AdminFlag):
+    """
+    How many Instagram/Facebook thumbnails in this folder are dead or dying.
+
+    Pure arithmetic on each URL's `oe` expiry — no network calls — so the UI can
+    poll this cheaply to decide whether to offer the regenerate action at all.
+    """
+    assert_folder_visible(folder_id, admin)
+    try:
+        videos = _fetch_cached_platform_videos(folder_id)
+    except Exception as e:
+        logger.error(f"Error checking thumbnail status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check thumbnail status")
+
+    now = time.time()
+    expired = sum(1 for v in videos if is_thumbnail_expired(v.get("thumbnail"), now))
+    return {
+        "folder_id": str(folder_id),
+        "total": len(videos),
+        "expired": expired,
+    }
+
+
+@router.post("/regenerate-thumbnails")
+def regenerate_thumbnails(request: RegenerateThumbnailsRequest, admin: AdminFlag):
+    """
+    Re-extract expired Instagram/Facebook thumbnails and store them permanently.
+
+    Meta's CDN thumbnail URLs are signed and expire in ~4.5 days, so the URL
+    saved at upload time eventually 403s and the card goes blank. This mints a
+    fresh URL via yt-dlp, then uploads the actual bytes to our storage bucket so
+    the replacement never expires — each video needs this at most once.
+
+    Only rows whose `oe` expiry has actually passed are re-extracted (unless
+    `force`): each one is a real Instagram API hit, and Instagram rate-limits
+    aggressively, so re-fetching a whole folder blindly is a good way to get
+    blocked. Streams NDJSON so a large folder shows progress instead of hanging,
+    and so one deleted post fails alone rather than aborting the batch.
+    """
+    # Checked before the stream opens — once StreamingResponse starts, an
+    # HTTPException can no longer produce a proper error status.
+    assert_folder_visible(request.folder_id, admin)
+
+    def event_stream():
+        try:
+            videos = _fetch_cached_platform_videos(request.folder_id)
+        except Exception as e:
+            logger.error(f"Error loading videos for thumbnail regeneration: {e}")
+            yield json.dumps({"type": "error", "message": "Could not load videos for this folder."}) + "\n"
+            return
+
+        now = time.time()
+        targets = [
+            v for v in videos
+            if request.force or is_thumbnail_expired(v.get("thumbnail"), now)
+        ]
+
+        total = len(targets)
+        yield json.dumps({"type": "start", "total": total, "checked": len(videos)}) + "\n"
+        if not total:
+            yield json.dumps({"type": "complete", "updated": 0, "failed": 0, "total": 0}) + "\n"
+            return
+
+        def regenerate(video: dict) -> tuple[dict, str | None]:
+            """Fresh URL from yt-dlp, then persist the bytes. Runs off-thread."""
+            metadata = extract_video_metadata(video["url"])
+            if not metadata or not metadata.get("thumbnail"):
+                return video, None
+            stored = store_thumbnail(
+                str(request.folder_id), str(video["id"]), metadata["thumbnail"]
+            )
+            # If the upload failed, fall back to the fresh CDN URL: it still
+            # expires, but it's better than leaving the user with a dead one.
+            return video, stored or metadata["thumbnail"]
+
+        updated = 0
+        failed = 0
+        processed = 0
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(regenerate, v) for v in targets]
+
+            for future in as_completed(futures):
+                processed += 1
+                try:
+                    video, new_thumbnail = future.result()
+                except Exception as e:
+                    logger.warning(f"Thumbnail regeneration crashed: {e}")
+                    failed += 1
+                    yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
+                    continue
+
+                if not new_thumbnail:
+                    # Post deleted, private, or extraction blocked.
+                    failed += 1
+                    yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
+                    continue
+
+                try:
+                    supabase.table("videos").update(
+                        {"thumbnail": new_thumbnail}
+                    ).eq("id", str(video["id"])).execute()
+                    updated += 1
+                    yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "updated"}) + "\n"
+                except Exception as e:
+                    logger.error(f"Could not update thumbnail for video {video['id']}: {e}")
+                    failed += 1
+                    yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
+
+        yield json.dumps({"type": "complete", "updated": updated, "failed": failed, "total": total}) + "\n"
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")

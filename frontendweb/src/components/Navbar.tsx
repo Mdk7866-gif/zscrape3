@@ -7,6 +7,7 @@ import Sidebar from "@/components/Sidebar";
 import AdminAskPasswordPopUp from "@/components/AdminAskPasswordPopUp";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
 import ThemeToggle from "@/components/ThemeToggle";
+import RegenerateThumbnailsButton from "@/components/RegenerateThumbnailsButton";
 import { useAdmin } from "@/components/AdminContext";
 import { APP_VERSION } from "@/lib/version";
 
@@ -76,6 +77,10 @@ export default function Navbar() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+            {/* Renders nothing off folder pages, or when no Instagram/Facebook
+                thumbnail in the open folder has actually expired. */}
+            <RegenerateThumbnailsButton />
+
             <ThemeToggle />
 
             {/* Fixed width across all three states (checking / in / out) so the
