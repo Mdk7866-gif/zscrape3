@@ -10,8 +10,8 @@ services:
     volumes:
       - ./backend/downloads:/app/downloads
       # Kept out of the image on purpose (see backend/.dockerignore) — these are
-      # real signed-in sessions. Read-only; the app works without the file.
-      - ./backend/cookies.txt:/app/cookies.txt:ro
+      # real signed-in sessions. Writable; yt-dlp updates session cookies during extraction.
+      - ./backend/cookies.txt:/app/cookies.txt
     env_file:
       - ./backend/.env
     environment:

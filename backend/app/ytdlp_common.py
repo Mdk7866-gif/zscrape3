@@ -44,7 +44,7 @@ YOUTUBE_PLAYER_CLIENTS = ["tv_simply", "android_vr"]
 # SABR-locked to a 360p pre-merged format — confirmed by hand, full 1080p.
 # web_creator also reaches 1080p but requires the account to own a channel,
 # so it's left out to keep the fallback broadly reliable.
-YOUTUBE_COOKIE_FALLBACK_CLIENTS = ["web_embedded", "web_safari"]
+YOUTUBE_COOKIE_FALLBACK_CLIENTS = ["web_embedded", "web_safari", "web", "mweb"]
 
 # Substrings (lowercased) yt-dlp uses when YouTube rate-limits or bot-checks
 # an anonymous request. Signed-in cookies get a separate, much less

@@ -4,6 +4,12 @@ import shutil
 import subprocess
 import urllib.request
 import urllib.error
+from urllib.parse import parse_qs, urlparse
+
+try:
+    from curl_cffi import requests as _curl_requests
+except ImportError:
+    _curl_requests = None
 
 from app.ytdlp_common import (
     apply_youtube_opts,
@@ -42,6 +48,30 @@ def _get_platform(url: str) -> str:
         return "facebook"
     return "unknown"
 
+def _resolve_google_share_url(url: str) -> str:
+    """
+    Google share links (e.g. share.google/XXXXX) redirect via Google Search/Image pages.
+    Use curl_cffi with browser impersonation to follow redirects and extract imgrefurl or final target URL.
+    """
+    if "share.google" not in url.lower():
+        return url
+    if not _curl_requests:
+        logger.warning(f"curl_cffi is missing, cannot resolve Google share link {url!r}")
+        return url
+    try:
+        r = _curl_requests.get(url, impersonate="chrome124", allow_redirects=True, timeout=10)
+        final_url = str(r.url)
+        if "google.com/imgres" in final_url:
+            parsed = urlparse(final_url)
+            qs = parse_qs(parsed.query)
+            if "imgrefurl" in qs and qs["imgrefurl"]:
+                final_url = qs["imgrefurl"][0]
+        logger.info(f"Resolved Google share URL {url!r} -> {final_url!r}")
+        return final_url
+    except Exception as e:
+        logger.warning(f"Could not resolve Google share URL {url!r}: {e}. Using original.")
+        return url
+
 
 def _resolve_reddit_share_url(url: str) -> str:
     """
@@ -73,11 +103,14 @@ def extract_video_metadata(url: str) -> dict | None:
     Handles Twitter/X, Instagram, Reddit, YouTube, etc.
     Returns dict with title, duration_seconds, platform, thumbnail, url.
     """
-    platform = _get_platform(url)
-
-    # Reddit share links (/s/XXXXX) are redirects — resolve to the real post URL first
-    if platform == "reddit":
+    # Short / share link resolution (Google share, Reddit share, etc.) must happen BEFORE
+    # platform detection so platform-specific format options apply to the real target URL.
+    if "share.google" in url.lower():
+        url = _resolve_google_share_url(url)
+    elif "reddit.com" in url.lower() or "redd.it" in url.lower():
         url = _resolve_reddit_share_url(url)
+
+    platform = _get_platform(url)
 
     # Platform-specific options
     base_opts = {
