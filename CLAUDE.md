@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-zscrape3 is a video cataloging/downloading tool: users paste messy text containing links, an LLM (GPT-4o via LangGraph) extracts URLs, yt-dlp pulls metadata (and later the actual video) for each, and results are organized into folders backed by Supabase (Postgres). It's a two-service app — `backend` (FastAPI) and `frontendweb` (Next.js) — normally run together via `docker-compose.yml`.
+zscrape3 is a video cataloging/downloading tool: users paste messy text containing links, an LLM (GPT-5.6 Luna via LangGraph) extracts URLs, yt-dlp pulls metadata (and later the actual video) for each, and results are organized into folders backed by Supabase (Postgres). It's a two-service app — `backend` (FastAPI) and `frontendweb` (Next.js) — normally run together via `docker-compose.yml`.
 
 ## Commands
 
@@ -96,7 +96,7 @@ A password-gated private workspace: the admin creates folders / adds URLs / down
 
 - `main.py` — FastAPI app, CORS from `settings.allowed_origins_list`, mounts `api_router`.
 - `routes/router.py` — combines all route modules; each module owns one URL prefix/domain: `chatgpturlchecker` (`/chatgpturlchecker`), `downloads` (`/download`), `failed_urls` (`/failed-urls`), `crudfolders` (`/folder`), `crudvideos` (`/video`), `proxy` (`/proxy`), `video_download_status` (`/video-status`).
-- `routes/chatgpturlchecker.py` — a minimal LangGraph single-node graph that calls `gpt-4o` with structured output to pull every URL (valid or not) out of pasted text, dedupes, then round-robin interleaves results by platform so the bulk-upload queue processes different platforms in parallel rather than one platform at a time.
+- `routes/chatgpturlchecker.py` — a minimal LangGraph single-node graph that calls `gpt-5.6-luna` with structured output to pull every URL (valid or not) out of pasted text, including WhatsApp-style timestamp/sender prefixes and Reddit `/s/<share-id>` links. It dedupes, then round-robin interleaves results by platform so the bulk-upload queue processes different platforms in parallel rather than one platform at a time.
 - `routes/yt_dlpextractmetadataofvideo.py` — shared yt-dlp metadata extraction (`extract_video_metadata`), not itself a route; per-platform yt-dlp `format`/option tuning (Instagram, Reddit, Twitter/X, YouTube-and-other). Reddit share links with a real `/s/<share-id>` path segment and Google share links (`share.google/...`) get resolved via manual redirect followers before platform detection and extraction. The resolver must never replace the original URL with an empty or non-HTTP redirect result. Reddit gets `backend/cookies.txt` directly for auth; YouTube goes through `extract_with_youtube_fallback()` (see `ytdlp_common.py` below), which only reaches for cookies on a rate-limit or age-gate failure.
 
   **Instagram duration used to come back as 0** (frontend showed `--:--` — see below). yt-dlp's Instagram extractor sources `duration` from a single field (`video_duration`) in Instagram's own API response, and on some Reels that field is simply absent. Confirmed by probing real Reels: when it's missing, *nothing else in the returned info has the duration either* — Instagram's DASH uses `SegmentBase` (one byte-ranged file per representation), so the format dicts carry no `fragments` to sum, no `filesize`, and the manifest's `mediaPresentationDuration` is parsed by yt-dlp internally but never exposed on the formats.

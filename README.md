@@ -1,6 +1,6 @@
 # zscrape3
 
-Video URL manager: paste messy text containing links, an LLM (GPT-4o via LangGraph) extracts the URLs, yt-dlp pulls metadata for each, and results are organized into folders backed by Supabase (Postgres). Videos can then be downloaded to disk with live progress tracking. A password-gated **admin workspace** provides a second, private set of folders that only the admin can see.
+Video URL manager: paste messy text containing links, an LLM (GPT-5.6 Luna via LangGraph) extracts the URLs, yt-dlp pulls metadata for each, and results are organized into folders backed by Supabase (Postgres). Videos can then be downloaded to disk with live progress tracking. A password-gated **admin workspace** provides a second, private set of folders that only the admin can see.
 
 Two services — `backend` (FastAPI) and `frontendweb` (Next.js) — normally run together via `docker-compose.yml`. See [`CLAUDE.md`](./CLAUDE.md) for commands, environment setup, and a full architecture write-up (including the YouTube/Instagram anti-bot workarounds).
 
@@ -32,7 +32,7 @@ zscrape3/
 │   │   ├── routes/
 │   │   │   ├── router.py                        — combines all route modules into api_router
 │   │   │   ├── admin.py                         — /admin/*         — login / logout / session
-│   │   │   ├── chatgpturlchecker.py             — POST /chatgpturlchecker — LangGraph + GPT-4o URL extraction
+│   │   │   ├── chatgpturlchecker.py             — POST /chatgpturlchecker — LangGraph + GPT-5.6 Luna URL extraction
 │   │   │   ├── crudfolders.py                   — /folder/*        — folder CRUD
 │   │   │   ├── crudvideos.py                    — /video/*         — video CRUD + bulk-upload (NDJSON stream)
 │   │   │   ├── downloads.py                     — /download/*      — actual video downloads (background jobs)

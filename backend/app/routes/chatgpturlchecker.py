@@ -9,7 +9,7 @@ from app.schemas.url_checker import ChatRequest, ChatResponse
 
 router = APIRouter(
     prefix="/chatgpturlchecker",
-    tags=["chat — simple langgraph chat with gpt-4o"]
+    tags=["chat — simple langgraph chat with GPT-5.6 Luna"]
 )
 
 # ── State Definition ──────────────────────────────────────────────────────────
@@ -23,6 +23,8 @@ SYSTEM_PROMPT = (
     "You are an expert URL extractor. Your task is to extract ALL URLs from the user's input, including both valid and invalid/broken URLs. "
     "Do NOT ignore, filter out, or eliminate any URL, even if it has typos, is invalid, is from an unknown platform, or is formatted incorrectly. "
     "If the input contains URLs that are stuck together (e.g., without spaces), separated by commas, or embedded in comments/text, you must extract each individual URL. "
+    "WhatsApp-style exports may prefix a URL with a timestamp and sender name (for example, '[3:05 am, 12/09/2026] Zaid:'); extract only the URL. "
+    "Preserve complete Reddit share links, including their '/r/<subreddit>/s/<share-id>' path. "
     "Clean each URL by removing surrounding quotes, brackets, parentheses, trailing punctuation (like commas or periods), tracking parameters (such as si, igsh, fbclid, etc., if safe to remove), or markdown syntax. "
     "Do NOT remove or filter out any URL under any circumstances. "
     "Return a structured list of these URLs."
@@ -41,7 +43,7 @@ def call_model(state: AgentState, config: RunnableConfig = None):
         urls: List[str]
 
     llm = ChatOpenAI(
-        model="gpt-4o",
+        model="gpt-5.6-luna",
         api_key=settings.CHATGPT_PAID_API_KEY,
         temperature=0
     ).with_structured_output(ChatResponseSchema)
@@ -73,7 +75,7 @@ async def chat_query(
     settings: Settings = Depends(get_settings)
 ):
     """
-    LangGraph endpoint that extracts URLs from the user query using GPT-4o.
+    LangGraph endpoint that extracts URLs from the user query using GPT-5.6 Luna.
     """
     initial_state = {
         "messages": [HumanMessage(content=body.query)]
