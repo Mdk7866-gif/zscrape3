@@ -79,7 +79,11 @@ def _resolve_reddit_share_url(url: str) -> str:
     Follow the redirect chain and return the final destination URL.
     If resolution fails, return the original URL unchanged.
     """
-    if "/s/" not in url:
+    # Match a real path segment rather than searching the full URL. Query-string
+    # values are not part of a Reddit share-link path and must not trigger a
+    # redirect request.
+    path_segments = urlparse(url).path.lower().split("/")
+    if "s" not in path_segments:
         return url  # Not a share link, skip
     try:
         req = urllib.request.Request(
@@ -90,6 +94,12 @@ def _resolve_reddit_share_url(url: str) -> str:
         # Don't auto-follow so we can log each hop; actually we DO want to follow
         with urllib.request.urlopen(req, timeout=10) as response:
             resolved = response.url
+        if not resolved or not resolved.startswith(("http://", "https://")):
+            logger.warning(
+                f"Reddit share URL {url!r} resolved to an invalid URL {resolved!r}. "
+                "Using the original."
+            )
+            return url
         logger.info(f"Resolved Reddit share URL {url!r} -> {resolved!r}")
         return resolved
     except Exception as e:
