@@ -22,6 +22,7 @@ from app.ytdlp_common import (
     COOKIE_PATH as _COOKIE_PATH,
     HAS_COOKIES as _HAS_COOKIES,
 )
+from app.routes.yt_dlpextractmetadataofvideo import resolve_share_url
 
 router = APIRouter(prefix="/download", tags=["download"])
 logger = logging.getLogger(__name__)
@@ -133,7 +134,11 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
 
 def _download_sync(job: dict) -> None:
     job_id = job["job_id"]
-    url = job["url"]
+    original_url = job["url"]
+    # The database intentionally keeps the URL the user supplied, including a
+    # Reddit /s/<share-id> link. Resolve it here too: metadata extraction does
+    # this already, but yt-dlp cannot reliably follow those share links itself.
+    url = resolve_share_url(original_url)
     cancel_event: threading.Event = job["cancel_event"]
     platform = _get_platform(url)
 
@@ -197,6 +202,8 @@ def _download_sync(job: dict) -> None:
             _delete_path(tmp_dir)
             return
 
+        if url != original_url:
+            logger.info(f"Resolved download URL {original_url!r} -> {url!r}")
         logger.info(f"Starting download for job {job_id}, platform={platform}, url={url}")
 
         info = extract_with_youtube_fallback(ydl_opts, url, platform, download=True)

@@ -107,6 +107,20 @@ def _resolve_reddit_share_url(url: str) -> str:
         return url
 
 
+def resolve_share_url(url: str) -> str:
+    """Resolve supported redirect-style links before yt-dlp sees them.
+
+    Both metadata extraction and downloading must use this helper. Saving an
+    original Reddit ``/s/<share-id>`` link is useful, but yt-dlp cannot always
+    follow it itself; passing its resolved post URL avoids a generic 403.
+    """
+    if "share.google" in url.lower():
+        return _resolve_google_share_url(url)
+    if "reddit.com" in url.lower() or "redd.it" in url.lower():
+        return _resolve_reddit_share_url(url)
+    return url
+
+
 def extract_video_metadata(url: str) -> dict | None:
     """
     Extracts metadata from a video URL using yt-dlp.
@@ -115,10 +129,7 @@ def extract_video_metadata(url: str) -> dict | None:
     """
     # Short / share link resolution (Google share, Reddit share, etc.) must happen BEFORE
     # platform detection so platform-specific format options apply to the real target URL.
-    if "share.google" in url.lower():
-        url = _resolve_google_share_url(url)
-    elif "reddit.com" in url.lower() or "redd.it" in url.lower():
-        url = _resolve_reddit_share_url(url)
+    url = resolve_share_url(url)
 
     platform = _get_platform(url)
 

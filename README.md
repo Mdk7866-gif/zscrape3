@@ -35,11 +35,11 @@ zscrape3/
 │   │   │   ├── chatgpturlchecker.py             — POST /chatgpturlchecker — LangGraph + GPT-5.6 Luna URL extraction
 │   │   │   ├── crudfolders.py                   — /folder/*        — folder CRUD
 │   │   │   ├── crudvideos.py                    — /video/*         — video CRUD + bulk-upload (NDJSON stream)
-│   │   │   ├── downloads.py                     — /download/*      — actual video downloads (background jobs)
+│   │   │   ├── downloads.py                     — /download/*      — background video downloads; resolves Reddit/Google share links first
 │   │   │   ├── failed_urls.py                   — /failed-urls/*   — failed-URL review/retry list
 │   │   │   ├── proxy.py                         — /proxy/image     — thumbnail proxy (Meta CDN hotlink bypass)
 │   │   │   ├── video_download_status.py         — /video-status/*  — persisted per-video download status
-│   │   │   └── yt_dlpextractmetadataofvideo.py  — shared yt-dlp metadata extraction (not a route)
+│   │   │   └── yt_dlpextractmetadataofvideo.py  — shared yt-dlp metadata extraction + Reddit/Google share-link resolution (not a route)
 │   │   └── schemas/                             — Pydantic request/response models
 │   │       ├── download.py
 │   │       ├── failed_url.py
