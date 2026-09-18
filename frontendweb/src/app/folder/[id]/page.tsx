@@ -94,6 +94,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   const [videos, setVideos] = useState<Video[]>([]);
   const [folderName, setFolderName] = useState("");
   const [folderCreatedAt, setFolderCreatedAt] = useState("");
+  const [folderUpdatedAt, setFolderUpdatedAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPopup, setShowPopup] = useState(false);
@@ -114,6 +115,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     jobs,
     hasActiveDownloads,
     loadFolderStatuses,
+    loadDownloadDirectory,
     downloadDir,
     downloadDirState,
     pickDownloadDir,
@@ -147,6 +149,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
       if (folder) {
         setFolderName(folder.name);
         setFolderCreatedAt(folder.created_at || "");
+        setFolderUpdatedAt(folder.updated_at || "");
       }
     } catch {
       /* the header just stays on its placeholder */
@@ -163,6 +166,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     fetchVideos();
     fetchFolderInfo();
     loadFolderStatuses(folderId);
+    loadDownloadDirectory(folderId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderId, isAdmin, checking]);
 
@@ -239,7 +243,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
 
   const handleDownloadAllConfirmed = () => {
     setShowDownloadAllConfirm(false);
-    roundRobinByPlatform([...videosToDownload]).forEach((v) => addToQueue(v.id));
+    roundRobinByPlatform([...videosToDownload]).forEach((v) => addToQueue(v.id, folderId));
   };
 
   const groups = groupByDate(paginatedVideos);
@@ -272,10 +276,27 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
                   <>
                     <span>
                       Created{" "}
-                      {new Date(folderCreatedAt).toLocaleDateString("en-IN", {
+                      {new Date(folderCreatedAt).toLocaleString("en-IN", {
                         day: "2-digit",
                         month: "short",
                         year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    <span aria-hidden>·</span>
+                  </>
+                )}
+                {folderUpdatedAt && (
+                  <>
+                    <span>
+                      Updated{" "}
+                      {new Date(folderUpdatedAt).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
                       })}
                     </span>
                     <span aria-hidden>·</span>
@@ -451,15 +472,14 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
             ) : (
               <>
                 <span className="hidden sm:inline">
-                  No save folder selected — downloads go to your browser&apos;s default Downloads
-                  folder.
+                  This project uses your browser&apos;s default Downloads folder.
                 </span>
-                <span className="sm:hidden">Using browser&apos;s default Downloads folder.</span>
+                <span className="sm:hidden">Using default Downloads folder.</span>
               </>
             )}
           </span>
           <button
-            onClick={pickDownloadDir}
+            onClick={() => pickDownloadDir(folderId)}
             disabled={downloadDirState === "checking" || downloadDirState === "unsupported"}
             className="shrink-0 font-semibold underline underline-offset-2 hover:opacity-80 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-70"
           >
@@ -557,6 +577,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
                       <VideoDataCard
                         key={video.id}
                         video={video}
+                        folderId={folderId}
                         onDelete={(id) => setShowDeleteConfirm(id)}
                       />
                     ))}

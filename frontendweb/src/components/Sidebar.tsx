@@ -26,7 +26,7 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const { hasActiveDownloads } = useDownloadQueue();
+  const { hasActiveDownloads, removeDownloadDirectory } = useDownloadQueue();
   const { isAdmin, checking } = useAdmin();
 
   const fetchFolders = useCallback(async () => {
@@ -74,6 +74,11 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
       setError(null);
       const res = await apiFetch(`/folder/delete/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete folder");
+      // The backend deletion succeeded, so its browser-only folder override is
+      // now stale and can safely be removed as well.
+      await removeDownloadDirectory(id).catch((cleanupError) => {
+        console.error("Could not remove saved download folder", cleanupError);
+      });
       fetchFolders();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete folder");

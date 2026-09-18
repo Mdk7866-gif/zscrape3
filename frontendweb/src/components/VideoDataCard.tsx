@@ -50,9 +50,11 @@ function formatDuration(seconds: number): string {
 
 export default function VideoDataCard({
   video,
+  folderId,
   onDelete,
 }: {
   video: VideoData;
+  folderId: string;
   onDelete: (id: string) => void;
 }) {
   const { jobs, dbStatuses, addToQueue, cancelJob, removeJob } = useDownloadQueue();
@@ -77,12 +79,12 @@ export default function VideoDataCard({
   // crashed mid-download. Treat as fresh so it can be started again.
   const isFresh = !job && (!dbStatus || dbStatus === "fresh" || dbStatus === "pending");
 
-  const startDownload = () => addToQueue(video.id);
+  const startDownload = () => addToQueue(video.id, folderId);
   const dismissState = () => removeJob(video.id);
 
   const handleRedownload = () => {
     setShowRedownloadConfirm(false);
-    addToQueue(video.id);
+    addToQueue(video.id, folderId);
   };
 
   const getPhaseText = () => {
