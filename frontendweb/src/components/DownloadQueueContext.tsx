@@ -8,6 +8,7 @@ import { apiFetch, apiUrl } from "@/lib/api";
 import AlertMessagePopUp from "@/components/AlertMessagePopUp";
 
 export type DownloadStatus = "fresh" | "pending" | "downloaded" | "cancelled" | "failed";
+export const FOLDER_ACTIVITY_UPDATED_EVENT = "zscrape:folder-activity-updated";
 
 export interface DownloadJob {
   videoId: string;
@@ -162,12 +163,19 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   // ── Sync job completion to DB ──────────────────────────────────────────────
   const syncStatusToDB = useCallback(async (videoId: string, status: DownloadStatus) => {
     try {
-      await apiFetch("/video-status/update", {
+      const res = await apiFetch("/video-status/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_id: videoId, status }),
       });
+      if (!res.ok) throw new Error("Could not update download status");
+      const data = await res.json() as { folder_id?: string };
       setDbStatuses((prev) => ({ ...prev, [videoId]: status }));
+      if (["downloaded", "failed", "cancelled"].includes(status) && data.folder_id) {
+        window.dispatchEvent(new CustomEvent(FOLDER_ACTIVITY_UPDATED_EVENT, {
+          detail: { folderId: data.folder_id },
+        }));
+      }
     } catch (e) {
       console.error("Failed to sync download status to DB", e);
     }

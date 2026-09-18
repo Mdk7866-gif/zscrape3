@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from uuid import UUID
 from typing import Literal
@@ -6,6 +7,9 @@ from pydantic import BaseModel
 
 from app.supabase import supabase
 from app.admin_auth import AdminFlag, assert_folder_visible, assert_video_visible
+from app.folder_activity import (
+    VIDEO_DOWNLOADED, VIDEO_DOWNLOAD_FAILED, VIDEO_DOWNLOAD_CANCELLED, record_folder_activity,
+)
 
 router = APIRouter(prefix="/video-status", tags=["video-download-status"])
 logger = logging.getLogger(__name__)
@@ -40,14 +44,47 @@ def get_folder_statuses(folder_id: UUID, admin: AdminFlag):
 
 @router.post("/update")
 def update_status(request: UpdateStatusRequest, admin: AdminFlag):
-    """Upsert download status for a video. Creates or updates the row."""
+    """Upsert status and record only real terminal status transitions as activity."""
     assert_video_visible(request.video_id, admin)
     try:
+        existing = (
+            supabase.table("video_download_status")
+            .select("status")
+            .eq("video_id", request.video_id)
+            .execute()
+        )
+        previous_status = existing.data[0]["status"] if existing.data else "fresh"
+
+        video = (
+            supabase.table("videos")
+            .select("folder_id")
+            .eq("id", request.video_id)
+            .execute()
+        )
+        if not video.data:
+            raise HTTPException(status_code=404, detail="Video not found")
+        folder_id = str(video.data[0]["folder_id"])
         supabase.table("video_download_status").upsert(
-            {"video_id": request.video_id, "status": request.status},
+            {
+                "video_id": request.video_id,
+                "status": request.status,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
             on_conflict="video_id",
         ).execute()
-        return {"success": True, "video_id": request.video_id, "status": request.status}
+
+        activity_by_status = {
+            "downloaded": VIDEO_DOWNLOADED,
+            "failed": VIDEO_DOWNLOAD_FAILED,
+            "cancelled": VIDEO_DOWNLOAD_CANCELLED,
+        }
+        activity = activity_by_status.get(request.status)
+        if activity and previous_status != request.status:
+            record_folder_activity(folder_id, activity)
+
+        return {"success": True, "video_id": request.video_id, "folder_id": folder_id, "status": request.status}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating status for video {request.video_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

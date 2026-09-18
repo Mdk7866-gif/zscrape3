@@ -10,6 +10,7 @@ CREATE TABLE public.folders (
   name character varying NOT NULL UNIQUE,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_activity text NOT NULL DEFAULT 'Folder created',
   is_admin boolean NOT NULL DEFAULT false,
   CONSTRAINT folders_pkey PRIMARY KEY (id)
 );

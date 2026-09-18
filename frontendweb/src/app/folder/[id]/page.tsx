@@ -5,12 +5,26 @@ import VideoDataCard from "@/components/VideoDataCard";
 import ChatgptUrlCheckerPopUpCard from "@/components/ChatgptUrlCheckerPopUpCard";
 import FailedUrlShowPopUpCard from "@/components/FailedUrlShowPopUpCard";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
-import { useDownloadQueue } from "@/components/DownloadQueueContext";
+import { FOLDER_ACTIVITY_UPDATED_EVENT, useDownloadQueue } from "@/components/DownloadQueueContext";
 import { useAdmin } from "@/components/AdminContext";
 import { apiFetch } from "@/lib/api";
 import { THUMBNAILS_UPDATED_EVENT } from "@/components/RegenerateThumbnailsButton";
 
 const PAGE_SIZE = 50;
+
+function formatFolderTimestamp(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "Unknown time";
+  return timestamp.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
+}
 
 interface Video {
   id: string;
@@ -95,6 +109,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   const [folderName, setFolderName] = useState("");
   const [folderCreatedAt, setFolderCreatedAt] = useState("");
   const [folderUpdatedAt, setFolderUpdatedAt] = useState("");
+  const [folderLastActivity, setFolderLastActivity] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPopup, setShowPopup] = useState(false);
@@ -150,6 +165,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
         setFolderName(folder.name);
         setFolderCreatedAt(folder.created_at || "");
         setFolderUpdatedAt(folder.updated_at || "");
+        setFolderLastActivity(folder.last_activity || "");
       }
     } catch {
       /* the header just stays on its placeholder */
@@ -169,6 +185,16 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     loadDownloadDirectory(folderId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderId, isAdmin, checking]);
+
+  useEffect(() => {
+    const onFolderActivityUpdated = (event: Event) => {
+      const activityFolderId = (event as CustomEvent<{ folderId?: string }>).detail?.folderId;
+      if (activityFolderId === folderId) fetchFolderInfo();
+    };
+    window.addEventListener(FOLDER_ACTIVITY_UPDATED_EVENT, onFolderActivityUpdated);
+    return () => window.removeEventListener(FOLDER_ACTIVITY_UPDATED_EVENT, onFolderActivityUpdated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderId]);
 
   // The regenerate action lives in the Navbar, outside this tree, so it signals
   // completion by event rather than prop — refetch so the repaired thumbnails
@@ -276,13 +302,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
                   <>
                     <span>
                       Created{" "}
-                      {new Date(folderCreatedAt).toLocaleString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatFolderTimestamp(folderCreatedAt)}
                     </span>
                     <span aria-hidden>·</span>
                   </>
@@ -291,14 +311,14 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
                   <>
                     <span>
                       Updated{" "}
-                      {new Date(folderUpdatedAt).toLocaleString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatFolderTimestamp(folderUpdatedAt)}
                     </span>
+                    <span aria-hidden>·</span>
+                  </>
+                )}
+                {folderLastActivity && (
+                  <>
+                    <span className="font-medium text-accent">{folderLastActivity}</span>
                     <span aria-hidden>·</span>
                   </>
                 )}
@@ -637,7 +657,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
         <ChatgptUrlCheckerPopUpCard
           folderId={folderId}
           onClose={() => setShowPopup(false)}
-          onSuccess={fetchVideos}
+          onSuccess={() => { fetchVideos(); fetchFolderInfo(); }}
         />
       )}
       {showFailedPopup && (

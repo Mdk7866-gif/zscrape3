@@ -14,6 +14,7 @@ class FolderOut(BaseModel):
     is_admin: bool = False
     created_at: datetime
     updated_at: datetime
+    last_activity: str
 
 
 class FolderDeleteResponse(BaseModel):

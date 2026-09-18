@@ -15,6 +15,7 @@ from app.schemas.video import (
     RegenerateThumbnailsRequest,
 )
 from app.routes.yt_dlpextractmetadataofvideo import extract_video_metadata
+from app.folder_activity import VIDEO_ADDED, VIDEO_ADD_FAILED, record_folder_activity
 from app.thumbnail_store import (
     CACHED_PLATFORMS,
     delete_video_thumbnail,
@@ -153,6 +154,7 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
                         except Exception:
                             pass
                     failed_count += 1
+                    record_folder_activity(str(request.folder_id), VIDEO_ADD_FAILED)
                     yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
                     continue
 
@@ -175,6 +177,7 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
                         inserted_id = response.data[0]["id"]
                         next_number += 1
                         saved_count += 1
+                        record_folder_activity(str(request.folder_id), VIDEO_ADDED)
 
                         try:
                             supabase.table("video_download_status").insert({
@@ -195,6 +198,7 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
                     else:
                         logger.error(f"Error inserting video {raw_url}: {e}")
                         failed_count += 1
+                        record_folder_activity(str(request.folder_id), VIDEO_ADD_FAILED)
                         yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
 
         yield json.dumps({"type": "complete", "saved": saved_count, "duplicates": duplicate_count, "failed": failed_count}) + "\n"

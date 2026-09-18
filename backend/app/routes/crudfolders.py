@@ -5,6 +5,7 @@ from app.schemas.folder import FolderCreate, FolderOut, FolderDeleteResponse
 from app.supabase import supabase
 from app.admin_auth import AdminFlag, assert_folder_visible
 from app.thumbnail_store import delete_folder_thumbnails
+from app.folder_activity import FOLDER_CREATED
 from postgrest.exceptions import APIError
 
 router = APIRouter(
@@ -21,6 +22,7 @@ def create_folder(folder: FolderCreate, admin: AdminFlag):
         response = supabase.table("folders").insert({
             "name": folder.name,
             "is_admin": admin,
+            "last_activity": FOLDER_CREATED,
         }).execute()
         return response.data[0]
     except APIError as e:

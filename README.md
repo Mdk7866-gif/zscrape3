@@ -111,3 +111,7 @@ zscrape3/
 ## Download-folder persistence
 
 When supported by the browser, a user can choose an optional download folder for an individual project. Its File System Access handle is saved in that browser's IndexedDB under the project folder UUID; a project with no override uses the browser's default Downloads folder. On a later visit, the app restores the matching project folder without exposing its local path to the backend or Supabase. Browser permission is still authoritative: if access was revoked or the folder no longer exists, the stale handle is removed during restoration, immediately after the user grants access, or before a completed download is written. The UI explains what happened, and downloads safely fall back to the browser's default Downloads folder. Deleting a project through the app also removes its local override.
+
+## Folder activity timestamps
+
+Folder creation time is immutable. The latest meaningful project activity is stored in UTC in `folders.updated_at` and `folders.last_activity`: video added, add failed, downloaded, download failed, or cancelled. The folder header renders this timestamp in UTC with the activity note. Apply `migrations/002_add_folder_activity.sql` manually in Supabase before deploying this behavior.
