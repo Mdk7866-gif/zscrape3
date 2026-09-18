@@ -13,7 +13,7 @@ interface ChatgptUrlCheckerPopUpCardProps {
 
 const MAX_LINES = 100;
 const MAX_CHARS = 20000;
-const MAX_URLS_PER_BATCH = 50;
+const MAX_URLS_PER_BATCH = 70;
 
 export default function ChatgptUrlCheckerPopUpCard({
   folderId,

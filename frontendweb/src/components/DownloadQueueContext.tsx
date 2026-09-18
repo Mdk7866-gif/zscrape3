@@ -19,6 +19,8 @@ export interface DownloadJob {
   actualSize?: number;
 }
 
+export type DownloadDirectoryState = "checking" | "ready" | "permission-required" | "unsupported";
+
 interface DownloadQueueContextType {
   jobs: Record<string, DownloadJob>;
   /** Persistent DB statuses keyed by videoId */
@@ -31,6 +33,7 @@ interface DownloadQueueContextType {
   /** Load persistent statuses for a folder from the DB */
   loadFolderStatuses: (folderId: string) => Promise<void>;
   downloadDir: string | null;
+  downloadDirState: DownloadDirectoryState;
   pickDownloadDir: () => Promise<void>;
 }
 
@@ -46,12 +49,62 @@ declare global {
   interface Window {
     showDirectoryPicker?: (opts?: { mode?: string }) => Promise<FileSystemDirectoryHandle>;
   }
+
+  interface FileSystemDirectoryHandle {
+    queryPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+    requestPermission?: (descriptor?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>;
+  }
+
+}
+
+const DOWNLOAD_DIR_DB = "zscrape-download-directory";
+const DOWNLOAD_DIR_STORE = "settings";
+const DOWNLOAD_DIR_KEY = "selected-directory";
+
+function openDownloadDirDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DOWNLOAD_DIR_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(DOWNLOAD_DIR_STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Could not open browser storage."));
+  });
+}
+
+async function getSavedDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+  const db = await openDownloadDirDatabase();
+  try {
+    return await new Promise<FileSystemDirectoryHandle | null>((resolve, reject) => {
+      const request = db.transaction(DOWNLOAD_DIR_STORE, "readonly")
+        .objectStore(DOWNLOAD_DIR_STORE)
+        .get(DOWNLOAD_DIR_KEY);
+      request.onsuccess = () => resolve((request.result as FileSystemDirectoryHandle | undefined) ?? null);
+      request.onerror = () => reject(request.error ?? new Error("Could not read browser storage."));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function saveDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+  const db = await openDownloadDirDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const request = db.transaction(DOWNLOAD_DIR_STORE, "readwrite")
+        .objectStore(DOWNLOAD_DIR_STORE)
+        .put(handle, DOWNLOAD_DIR_KEY);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error ?? new Error("Could not save browser storage."));
+    });
+  } finally {
+    db.close();
+  }
 }
 
 export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<Record<string, DownloadJob>>({});
   const [dbStatuses, setDbStatuses] = useState<Record<string, DownloadStatus>>({});
   const [downloadDir, setDownloadDir] = useState<string | null>(null);
+  const [downloadDirState, setDownloadDirState] = useState<DownloadDirectoryState>("checking");
   // Replaces a native window.alert(): browser modals block the whole tab and
   // look nothing like the rest of the app's popups.
   const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
@@ -59,6 +112,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
   const downloadedJobIds = useRef<Set<string>>(new Set());
   const startingRef = useRef<Set<string>>(new Set());
   const pollingRef = useRef<Set<string>>(new Set());
+  const saveFallbackNoticeShown = useRef(false);
 
   const hasActiveDownloads = Object.values(jobs).some(
     (j) => j.status === "queued" || j.status === "downloading"
@@ -94,9 +148,58 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── Directory picker ───────────────────────────────────────────────────────
+  // A File System Access handle can be structured-cloned into IndexedDB. The
+  // path itself is intentionally never sent to the backend: it belongs to the
+  // user's computer, and browser permission remains under the user's control.
+  useEffect(() => {
+    let active = true;
+
+    const restoreDirectory = async () => {
+      if (!window.showDirectoryPicker) {
+        if (active) setDownloadDirState("unsupported");
+        return;
+      }
+
+      try {
+        const handle = await getSavedDirectoryHandle();
+        if (!active || !handle) {
+          if (active) setDownloadDirState("ready");
+          return;
+        }
+
+        dirHandleRef.current = handle;
+        if (!handle.queryPermission) {
+          setDownloadDirState("permission-required");
+          return;
+        }
+        const permission = await handle.queryPermission({ mode: "readwrite" });
+        if (!active) return;
+        if (permission === "granted") {
+          setDownloadDir(handle.name);
+          setDownloadDirState("ready");
+        } else {
+          setDownloadDirState("permission-required");
+        }
+      } catch (error) {
+        console.error("Could not restore download folder", error);
+        if (!active) return;
+        dirHandleRef.current = null;
+        setDownloadDirState("ready");
+        setAlert({
+          title: "Saved download folder unavailable",
+          message: "Your browser could not restore the saved folder. Choose a folder again, or downloads will use your browser's default Downloads folder.",
+        });
+      }
+    };
+
+    restoreDirectory();
+    return () => { active = false; };
+  }, []);
+
+  // Directory picker
   const pickDownloadDir = useCallback(async () => {
     if (!window.showDirectoryPicker) {
+      setDownloadDirState("unsupported");
       setAlert({
         title: "Folder selection unavailable",
         message:
@@ -104,45 +207,103 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
       });
       return;
     }
+
+    if (dirHandleRef.current && downloadDirState === "permission-required") {
+      try {
+        if (!dirHandleRef.current.requestPermission) {
+          throw new Error("This browser cannot restore folder permission.");
+        }
+        const permission = await dirHandleRef.current.requestPermission({ mode: "readwrite" });
+        if (permission === "granted") {
+          setDownloadDir(dirHandleRef.current.name);
+          setDownloadDirState("ready");
+          return;
+        }
+      } catch (error) {
+        console.error("Saved folder permission error", error);
+      }
+
+      dirHandleRef.current = null;
+      setDownloadDirState("ready");
+      setAlert({
+        title: "Folder access was not granted",
+        message: "The saved folder was left unchanged. Select a folder again to save downloads there, or use your browser's default Downloads folder.",
+      });
+      return;
+    }
+
     try {
       const handle = await window.showDirectoryPicker({ mode: "readwrite" });
       dirHandleRef.current = handle;
       setDownloadDir(handle.name);
+      setDownloadDirState("ready");
+      try {
+        await saveDirectoryHandle(handle);
+      } catch (error) {
+        console.error("Could not save download folder", error);
+        setAlert({
+          title: "Folder selected for this session",
+          message: "Your browser could not remember this folder for future visits. Downloads will still save there until you close this tab.",
+        });
+      }
     } catch (e) {
       // AbortError just means the user closed the picker — not worth logging.
       if (!(e instanceof DOMException) || e.name !== "AbortError") {
         console.error("Directory picker error", e);
+        setAlert({
+          title: "Could not select a download folder",
+          message: "No folder was changed. You can try again, or downloads will use your browser's default Downloads folder.",
+        });
       }
     }
-  }, []);
+  }, [downloadDirState]);
 
   // ── Trigger file save ──────────────────────────────────────────────────────
   const triggerSave = useCallback(async (jobId: string, filename: string) => {
     if (downloadedJobIds.current.has(jobId)) return;
     downloadedJobIds.current.add(jobId);
     const fileUrl = apiUrl(`/download/file/${jobId}`);
+    let downloadedBlob: Blob | null = null;
 
     if (dirHandleRef.current) {
       try {
+        if (!dirHandleRef.current.queryPermission) {
+          throw new Error("This browser cannot check folder permission.");
+        }
+        const permission = await dirHandleRef.current.queryPermission({ mode: "readwrite" });
+        if (permission !== "granted") throw new Error("Folder permission is no longer granted.");
         const res = await fetch(fileUrl);
         if (!res.ok) throw new Error("Fetch failed");
-        const blob = await res.blob();
+        downloadedBlob = await res.blob();
         const fh = await dirHandleRef.current.getFileHandle(filename, { create: true });
-        const writable = await (fh as any).createWritable();
-        await writable.write(blob);
+        const createWritable = fh.createWritable;
+        if (!createWritable) throw new Error("This browser cannot write to the selected folder.");
+        const writable = await createWritable.call(fh);
+        await writable.write(downloadedBlob);
         await writable.close();
         return;
       } catch (e) {
         console.error("Directory save failed, falling back", e);
-        downloadedJobIds.current.delete(jobId);
+        setDownloadDir(null);
+        setDownloadDirState("permission-required");
+        if (!saveFallbackNoticeShown.current) {
+          saveFallbackNoticeShown.current = true;
+          setAlert({
+            title: "Saved folder needs permission",
+            message: "The video was sent to your browser's default Downloads folder instead. Select Allow access to use your saved folder again.",
+          });
+        }
       }
     }
+
     const a = document.createElement("a");
-    a.href = fileUrl;
+    const blobUrl = downloadedBlob ? URL.createObjectURL(downloadedBlob) : null;
+    a.href = blobUrl ?? fileUrl;
     a.download = filename || "video.mp4";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    if (blobUrl) setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
   }, []);
 
   // ── Queue runner ───────────────────────────────────────────────────────────
@@ -181,10 +342,11 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
               phase: "starting",
             },
           }));
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to start download";
           setJobs((prev) => ({
             ...prev,
-            [nextVideoId]: { ...prev[nextVideoId], status: "failed", error: err.message },
+            [nextVideoId]: { ...prev[nextVideoId], status: "failed", error: message },
           }));
           syncStatusToDB(nextVideoId, "failed");
         } finally {
@@ -312,7 +474,7 @@ export function DownloadQueueProvider({ children }: { children: ReactNode }) {
       jobs, dbStatuses, hasActiveDownloads,
       addToQueue, cancelJob, removeJob, cancelAllJobs,
       loadFolderStatuses,
-      downloadDir, pickDownloadDir,
+      downloadDir, downloadDirState, pickDownloadDir,
     }}>
       {children}
       {alert && (

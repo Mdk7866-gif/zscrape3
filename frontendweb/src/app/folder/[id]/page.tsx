@@ -115,6 +115,7 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
     hasActiveDownloads,
     loadFolderStatuses,
     downloadDir,
+    downloadDirState,
     pickDownloadDir,
     cancelAllJobs,
   } = useDownloadQueue();
@@ -420,6 +421,8 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
         className={`shrink-0 border-b px-4 py-2 text-xs sm:px-6 lg:px-8 ${
           downloadDir
             ? "border-ok-line bg-ok-soft text-ok"
+            : downloadDirState === "checking"
+            ? "border-line bg-surface-2 text-muted"
             : "border-warn-line bg-warn-soft text-warn"
         }`}
       >
@@ -439,6 +442,12 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
               <>
                 Saving to <strong className="font-semibold">{downloadDir}</strong>
               </>
+            ) : downloadDirState === "checking" ? (
+              "Checking your saved download folder…"
+            ) : downloadDirState === "permission-required" ? (
+              "Your saved download folder needs permission. Allow access to use it again."
+            ) : downloadDirState === "unsupported" ? (
+              "This browser uses its default Downloads folder."
             ) : (
               <>
                 <span className="hidden sm:inline">
@@ -451,9 +460,18 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
           </span>
           <button
             onClick={pickDownloadDir}
-            className="shrink-0 font-semibold underline underline-offset-2 hover:opacity-80"
+            disabled={downloadDirState === "checking" || downloadDirState === "unsupported"}
+            className="shrink-0 font-semibold underline underline-offset-2 hover:opacity-80 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-70"
           >
-            {downloadDir ? "Change" : "Choose folder"}
+            {downloadDirState === "checking"
+              ? "Checking…"
+              : downloadDirState === "permission-required"
+              ? "Allow access"
+              : downloadDir
+              ? "Change"
+              : downloadDirState === "unsupported"
+              ? "Browser default"
+              : "Choose folder"}
           </button>
         </div>
       </div>

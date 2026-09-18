@@ -48,7 +48,7 @@ const CHANGELOG = [
 
 const STATS = [
   { value: 5, suffix: "×", label: "Parallel metadata workers" },
-  { value: 50, suffix: "", label: "URLs per extraction batch" },
+  { value: 70, suffix: "", label: "URLs per extraction batch" },
   { value: 6, suffix: "+", label: "Platforms supported" },
   { value: 0, suffix: "", label: "Re-encodes — remux only" },
 ];

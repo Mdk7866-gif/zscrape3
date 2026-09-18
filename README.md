@@ -107,3 +107,7 @@ zscrape3/
 ```
 
 `node_modules/`, `.venv/`, `.next/`, `__pycache__/`, and other generated/dependency directories are omitted above — they're gitignored and rebuilt by `npm install` / `uv sync`.
+
+## Download-folder persistence
+
+When supported by the browser, choosing a download folder saves a File System Access handle in that browser's IndexedDB. On a later visit, the app restores the folder without exposing its local path to the backend or Supabase. Browser permission is still authoritative: if access was revoked or the browser cannot restore the handle, the UI asks the user to allow access or choose a folder again, and safely falls back to the browser's default Downloads folder.

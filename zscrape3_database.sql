@@ -1,5 +1,8 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
+-- Local download-folder selection is intentionally not stored in Postgres.
+-- The frontend stores a browser File System Access handle in IndexedDB; browser
+-- permission governs access to the user's disk, and no local path reaches Supabase.
 
 CREATE TABLE public.folders (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
