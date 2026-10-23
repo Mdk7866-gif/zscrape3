@@ -2,14 +2,14 @@
 
 Video URL manager: paste messy text containing links, an LLM (GPT-5.6 Luna via LangGraph) extracts the URLs, yt-dlp pulls metadata for each, and results are organized into folders backed by Supabase (Postgres). Videos can then be downloaded to disk with live progress tracking. A password-gated **admin workspace** provides a second, private set of folders that only the admin can see.
 
-Two services — `backend` (FastAPI) and `frontendweb` (Next.js) — normally run together via `docker-compose.yml`. See [`CLAUDE.md`](./CLAUDE.md) for commands, environment setup, and a full architecture write-up (including the YouTube/Instagram anti-bot workarounds).
+Two services — `backend` (FastAPI) and `frontendweb` (Next.js) — normally run together via `docker-compose.yml`. See [`AGENTS.md`](./AGENTS.md) for commands, environment setup, and a full architecture write-up (including the YouTube/Instagram anti-bot workarounds).
 
 ## Directory structure
 
 ```
 zscrape3/
 ├── README.md                    — this file
-├── CLAUDE.md                    — architecture & command reference (start here for dev setup)
+├── AGENTS.md                    — architecture & command reference (start here for dev setup)
 ├── docker-compose.yml           — backend + frontend + PO-token provider services
 ├── zscrape3_database.sql        — Supabase schema (SQL)
 ├── quickdockerpush.md           — build/push Docker images; run the 3 local-dev servers
@@ -103,10 +103,23 @@ zscrape3/
 │   └── tsconfig.json
 │
 └── bgutil-provider/              — local install of the YouTube PO-token provider
-                                     (gitignored, not committed — see CLAUDE.md for setup)
+                                     (gitignored, not committed — see AGENTS.md for setup)
 ```
 
 `node_modules/`, `.venv/`, `.next/`, `__pycache__/`, and other generated/dependency directories are omitted above — they're gitignored and rebuilt by `npm install` / `uv sync`.
+
+## Reddit extraction
+
+Reddit metadata requests and downloads use Chrome TLS impersonation through
+`curl_cffi`, alongside `backend/cookies.txt` when available. A User-Agent header
+alone can receive an HTML 403 even with unexpired Reddit session cookies.
+yt-dlp construction is serialized to prevent duplicate plugin registration
+during the first parallel bulk upload; network extraction remains concurrent.
+Deleted posts and unavailable externally hosted videos can still fail extraction.
+Metadata can also remain available on a crosspost after its original video is
+deleted or restricted. If Reddit's media CDN refuses the file with HTTP 403,
+the download card explains that distinction and asks the user to check playback
+on the original post; loading metadata does not prove the media is accessible.
 
 ## Download-folder persistence
 
@@ -115,3 +128,39 @@ When supported by the browser, a user can choose an optional download folder for
 ## Folder activity timestamps
 
 Folder creation time is immutable. The latest meaningful project activity is stored in UTC in `folders.updated_at` and `folders.last_activity`: video added, add failed, downloaded, download failed, or cancelled. The folder header renders this timestamp in UTC with the activity note. Apply `migrations/002_add_folder_activity.sql` manually in Supabase before deploying this behavior.
+
+
+## Reliability checks
+
+GitHub Actions runs backend regression/lint checks and frontend security audit,
+lint, type, and production-build checks on pushes to `main` and on pull requests.
+The frontend pins Next.js and eslint-config-next to 16.4.3; dependency updates
+must pass the audit and build again before publishing.
+
+Run from `backend/`:
+
+```powershell
+uv run python -m unittest discover -s tests -v
+uv run ruff check app tests
+uv run python -m app.checkup
+```
+
+The regression suite runs offline with test credentials and mocked database/media
+calls. It covers platform hostnames, Reddit TLS, plugin initialization, the
+YouTube cookie fallback, worker failures, cancellation, temporary-file cleanup,
+missing FFmpeg, partial outputs, and bulk limits. `app.checkup` separately checks
+installed media tools, Node/Deno, browser TLS support, cookie expiry, the token
+provider, and Supabase read access. It never writes database rows or prints
+credentials. A locally unexpired cookie does not prove the session still works.
+
+Run `npm run lint`, `npx tsc --noEmit`, and `npm run build` from `frontendweb/`
+before publishing. Upload and thumbnail streams require an explicit completion
+event; an interrupted connection reports partial work instead of claiming success.
+Changing folders or workspaces resets their UI state, including pagination.
+
+Bulk uploads enforce `MAX_BULK_URLS` on the backend, isolate extraction-worker
+failures, and cancel queued work when their stream is closed. Downloads report
+setup failures instead of remaining queued, require FFmpeg before extraction,
+and never substitute a leftover unmerged stream for the final MP4. Backend
+Docker builds use `uv.lock` with `uv sync --frozen` so rebuilding does not
+silently change yt-dlp or other dependencies. No schema change is required.

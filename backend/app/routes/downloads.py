@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import yt_dlp
@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from app.supabase import supabase
+from app.platforms import get_platform
 from app.admin_auth import AdminFlag, assert_video_visible
 from app.ytdlp_common import (
     apply_youtube_opts,
@@ -37,7 +38,9 @@ _USER_AGENT = (
 jobs: dict[str, dict] = {}
 
 
-def _delete_path(path: str) -> None:
+def _delete_path(path: str | None) -> None:
+    if not path:
+        return
     try:
         if os.path.isfile(path):
             os.remove(path)
@@ -53,20 +56,7 @@ def _safe_filename(name: str) -> str:
     return name[:100] or "video"
 
 
-def _get_platform(url: str) -> str:
-    url_lower = url.lower()
-    if "twitter.com" in url_lower or "x.com" in url_lower:
-        return "twitter"
-    if "instagram.com" in url_lower:
-        return "instagram"
-    if "facebook.com" in url_lower or "fb.watch" in url_lower:
-        return "facebook"
-    if "reddit.com" in url_lower or "redd.it" in url_lower:
-        return "reddit"
-    if "tiktok.com" in url_lower:
-        return "tiktok"
-    return "other"
-
+_get_platform = get_platform
 
 def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> dict:
     """
@@ -135,72 +125,77 @@ def _get_ydl_opts(platform: str, out_tmpl: str, progress_hook, cancel_event) -> 
 def _download_sync(job: dict) -> None:
     job_id = job["job_id"]
     original_url = job["url"]
-    # The database intentionally keeps the URL the user supplied, including a
-    # Reddit /s/<share-id> link. Resolve it here too: metadata extraction does
-    # this already, but yt-dlp cannot reliably follow those share links itself.
-    url = resolve_share_url(original_url)
     cancel_event: threading.Event = job["cancel_event"]
-    platform = _get_platform(url)
-
-    tmp_dir = tempfile.mkdtemp(prefix="zscrape_dl_")
-    job["tmp_dir"] = tmp_dir
-    job["status"] = "downloading"
-    job["phase"] = "starting"
-
-    db_title = job.get("db_title") or "video"
-    safe_title = _safe_filename(db_title)
-    out_tmpl = os.path.join(tmp_dir, f"{safe_title}.%(ext)s")
-
-    # Track stream counts to weight progress correctly
-    _stream_ctx = {"total_streams": 1, "current_stream": 0}
-
-    def _progress_hook(d: dict) -> None:
-        if cancel_event.is_set():
-            raise yt_dlp.utils.DownloadError("Cancelled by user")
-
-        if d["status"] == "downloading":
-            downloaded = d.get("downloaded_bytes") or 0
-            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-
-            # Detect whether we're downloading video or audio stream
-            info = d.get("info_dict") or {}
-            vcodec = (info.get("vcodec") or "").lower()
-            acodec = (info.get("acodec") or "").lower()
-
-            if vcodec == "none" and acodec and acodec != "none":
-                # Pure audio stream (2nd pass in 2-stream download)
-                job["phase"] = "audio"
-                # Weight: audio = 50→95%
-                pct = int(downloaded / total * 45) if total else 0
-                job["progress"] = min(95, 50 + pct)
-            else:
-                # Video stream (or merged single stream)
-                job["phase"] = "video"
-                if platform in ("twitter", "instagram", "facebook", "tiktok"):
-                    # Single merged stream → full 0→95%
-                    job["progress"] = min(95, int(downloaded / total * 95)) if total else 0
-                else:
-                    # Separate streams → video = 0→50%
-                    job["progress"] = min(50, int(downloaded / total * 50)) if total else 0
-
-            job["downloaded_bytes"] = downloaded
-            job["total_bytes"] = total
-            job["speed"] = d.get("speed") or 0.0
-            job["eta"] = d.get("eta") or 0
-            job["updated_at"] = datetime.utcnow()
-
-        elif d["status"] == "finished":
-            job["phase"] = "merging"
-            job["progress"] = 97
-            job["updated_at"] = datetime.utcnow()
-
-    ydl_opts = _get_ydl_opts(platform, out_tmpl, _progress_hook, cancel_event)
-
+    tmp_dir = None
+    platform = _get_platform(original_url)
     try:
+        # The database intentionally keeps the URL the user supplied, including a
+        # Reddit /s/<share-id> link. Resolve it here too: metadata extraction does
+        # this already, but yt-dlp cannot reliably follow those share links itself.
+        url = resolve_share_url(original_url)
+        platform = _get_platform(url)
+
+        tmp_dir = tempfile.mkdtemp(prefix="zscrape_dl_")
+        job["tmp_dir"] = tmp_dir
+        job["status"] = "downloading"
+        job["phase"] = "starting"
+
+        db_title = job.get("db_title") or "video"
+        safe_title = _safe_filename(db_title)
+        out_tmpl = os.path.join(tmp_dir, f"{safe_title}.%(ext)s")
+
+        def _progress_hook(d: dict) -> None:
+            if cancel_event.is_set():
+                raise yt_dlp.utils.DownloadError("Cancelled by user")
+
+            if d["status"] == "downloading":
+                downloaded = d.get("downloaded_bytes") or 0
+                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+
+                # Detect whether we're downloading video or audio stream
+                info = d.get("info_dict") or {}
+                vcodec = (info.get("vcodec") or "").lower()
+                acodec = (info.get("acodec") or "").lower()
+
+                if vcodec == "none" and acodec and acodec != "none":
+                    # Pure audio stream (2nd pass in 2-stream download)
+                    job["phase"] = "audio"
+                    # Weight: audio = 50→95%
+                    pct = int(downloaded / total * 45) if total else 0
+                    job["progress"] = min(95, 50 + pct)
+                else:
+                    # Video stream (or merged single stream)
+                    job["phase"] = "video"
+                    if platform in ("twitter", "instagram", "facebook", "tiktok"):
+                        # Single merged stream → full 0→95%
+                        job["progress"] = min(95, int(downloaded / total * 95)) if total else 0
+                    else:
+                        # Separate streams → video = 0→50%
+                        job["progress"] = min(50, int(downloaded / total * 50)) if total else 0
+
+                job["downloaded_bytes"] = downloaded
+                job["total_bytes"] = total
+                job["speed"] = d.get("speed") or 0.0
+                job["eta"] = d.get("eta") or 0
+                job["updated_at"] = datetime.now(timezone.utc)
+
+            elif d["status"] == "finished":
+                job["phase"] = "merging"
+                job["progress"] = 97
+                job["updated_at"] = datetime.now(timezone.utc)
+
+        ydl_opts = _get_ydl_opts(platform, out_tmpl, _progress_hook, cancel_event)
+
         if cancel_event.is_set():
             job["status"] = "cancelled"
             _delete_path(tmp_dir)
             return
+
+        if not shutil.which("ffmpeg"):
+            raise RuntimeError(
+                "FFmpeg is not available to the backend. Install FFmpeg, add it "
+                "to PATH, and restart the backend before retrying."
+            )
 
         if url != original_url:
             logger.info(f"Resolved download URL {original_url!r} -> {url!r}")
@@ -219,29 +214,23 @@ def _download_sync(job: dict) -> None:
             pass
 
         if not file_path or not os.path.exists(file_path):
-            files = [
-                os.path.join(tmp_dir, f)
-                for f in os.listdir(tmp_dir)
-                if os.path.isfile(os.path.join(tmp_dir, f))
-                   and not f.endswith((".part", ".ytdl"))
-            ]
-            if not files:
-                raise ValueError("No output file found after download")
-            # Pick the largest file (the merged one)
-            file_path = max(files, key=os.path.getsize)
+            # Remuxing always targets this final MP4. Never select the largest
+            # leftover file: it could be an unmerged, silent video stream.
+            file_path = os.path.join(tmp_dir, f"{safe_title}.mp4")
+            if not os.path.isfile(file_path):
+                raise ValueError("No completed MP4 found after download and merging")
 
         if cancel_event.is_set():
             job["status"] = "cancelled"
             _delete_path(tmp_dir)
             return
 
-        ext = os.path.splitext(file_path)[1] or ".mp4"
         job["filename"] = os.path.basename(file_path)
         job["file_path"] = file_path
         job["status"] = "completed"
         job["phase"] = "done"
         job["progress"] = 100
-        job["updated_at"] = datetime.utcnow()
+        job["updated_at"] = datetime.now(timezone.utc)
 
         try:
             actual_size = os.path.getsize(file_path)
@@ -258,17 +247,27 @@ def _download_sync(job: dict) -> None:
             job["status"] = "cancelled"
         else:
             job["status"] = "failed"
-            job["error"] = err_str
+            if (platform == "reddit" and "unable to download video data" in err_str.lower()
+                    and "403" in err_str):
+                job["error"] = (
+                    "Reddit refused access to this video's media (HTTP 403). "
+                    "Post metadata can still load when the original video has been "
+                    "deleted or restricted. Open the original post and check whether "
+                    "the video plays; if it does, refresh backend/cookies.txt with a "
+                    "signed-in Reddit session and retry."
+                )
+            else:
+                job["error"] = err_str
             logger.error(f"yt-dlp error for job {job_id}: {err_str}")
         job["phase"] = "done"
-        job["updated_at"] = datetime.utcnow()
+        job["updated_at"] = datetime.now(timezone.utc)
         _delete_path(tmp_dir)
 
     except Exception as e:
         job["status"] = "failed"
         job["error"] = str(e)
         job["phase"] = "done"
-        job["updated_at"] = datetime.utcnow()
+        job["updated_at"] = datetime.now(timezone.utc)
         logger.error(f"Download error for job {job_id}: {e}")
         _delete_path(tmp_dir)
 
@@ -308,7 +307,7 @@ def start_download(request: StartDownloadRequest, admin: AdminFlag):
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
     job_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     job = {
         "job_id": job_id,
@@ -366,10 +365,13 @@ def cancel_download(job_id: str):
     if not job:
         return {"success": True, "job_id": job_id, "status": "cancelled"}
 
+    if job["status"] in ("completed", "failed", "cancelled"):
+        return {"success": True, "job_id": job_id, "status": job["status"]}
+
     job["cancel_event"].set()
     job["status"] = "cancelled"
     job["phase"] = "done"
-    job["updated_at"] = datetime.utcnow()
+    job["updated_at"] = datetime.now(timezone.utc)
 
     return {"success": True, "job_id": job_id, "status": "cancelled"}
 

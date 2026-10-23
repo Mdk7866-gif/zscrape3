@@ -1,2 +1,5 @@
 # PO token provider (installed locally by setup instructions, not project code)
 bgutil-provider/
+
+# Local signed-in sessions must stay on this machine.
+backend/cookies.txt

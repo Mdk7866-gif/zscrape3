@@ -17,10 +17,24 @@ Three things are needed to get full-quality downloads back:
 
 import logging
 import os
+import threading
 
 import yt_dlp
+from yt_dlp.networking.impersonate import ImpersonateTarget
+
+from app.platforms import get_platform
 
 logger = logging.getLogger(__name__)
+
+# YoutubeDL lazily loads plugins into process-wide registries. Concurrent first
+# constructors can register the same bgutil provider twice. Only construction
+# is serialized; metadata requests and downloads still run concurrently.
+_YTDLP_INIT_LOCK = threading.Lock()
+
+
+def _create_ytdlp(opts: dict) -> yt_dlp.YoutubeDL:
+    with _YTDLP_INIT_LOCK:
+        return yt_dlp.YoutubeDL(opts)
 
 # backend/cookies.txt — shared by every platform that needs auth (Reddit,
 # and now YouTube once its IP/anon-traffic rate limit kicks in). yt-dlp only
@@ -90,15 +104,19 @@ def extract_with_youtube_fallback(opts: dict, url: str, platform: str, *, downlo
     """Run yt-dlp's extract_info, retrying once with signed-in cookies if
     YouTube rate-limits the primary (cookie-less, full-quality) attempt.
 
-    A no-op passthrough for every platform other than YouTube, or when no
-    cookies.txt is present to retry with — those cases just raise as before.
+    Reddit uses Chrome TLS impersonation: a User-Agent header alone can receive
+    an HTML 403 instead of JSON even with valid session cookies. This applies
+    to both metadata extraction and downloads through this shared entry point.
+    Only YouTube retries with cookies; other failures raise as before.
     `platform` is accepted but not trusted alone: callers' platform-detection
     functions disagree on whether YouTube maps to "youtube" or falls through
     to a generic "other" bucket, so this also checks the URL directly.
     """
-    is_youtube = platform == "youtube" or "youtube.com" in url.lower() or "youtu.be" in url.lower()
+    is_youtube = get_platform(url) == "youtube"
+    if platform == "reddit":
+        opts = {**opts, "impersonate": ImpersonateTarget(client="chrome", version="124")}
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with _create_ytdlp(opts) as ydl:
             return ydl.extract_info(url, download=download)
     except Exception as e:
         if not is_youtube or not HAS_COOKIES or not _looks_like_youtube_ratelimit(e):
@@ -111,5 +129,5 @@ def extract_with_youtube_fallback(opts: dict, url: str, platform: str, *, downlo
             **(opts.get("extractor_args") or {}),
             "youtube": {"player_client": list(YOUTUBE_COOKIE_FALLBACK_CLIENTS)},
         }
-        with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+        with _create_ytdlp(fallback_opts) as ydl:
             return ydl.extract_info(url, download=download)

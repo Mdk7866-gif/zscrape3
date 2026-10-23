@@ -14,6 +14,11 @@ interface Folder {
 }
 
 export default function Sidebar({ onClose }: { onClose?: () => void }) {
+  const { isAdmin, checking } = useAdmin();
+  return <SidebarContent key={`${isAdmin}:${checking}`} onClose={onClose} />;
+}
+
+function SidebarContent({ onClose }: { onClose?: () => void }) {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [newFolderName, setNewFolderName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -29,19 +34,14 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const { hasActiveDownloads, removeDownloadDirectory } = useDownloadQueue();
   const { isAdmin, checking } = useAdmin();
 
-  const fetchFolders = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await apiFetch("/folder/fetchall");
+  const fetchFolders = useCallback(() => {
+    return apiFetch("/folder/fetchall").then(async (res) => {
       if (!res.ok) throw new Error("Failed to fetch folders");
-      const data = await res.json();
-      setFolders(data);
+      setFolders(await res.json());
       setError(null);
-    } catch (err) {
+    }).catch((err: unknown) => {
       setError(err instanceof Error ? err.message : "Failed to load folders");
-    } finally {
-      setLoading(false);
-    }
+    }).finally(() => setLoading(false));
   }, []);
 
   const createFolder = async (e: React.FormEvent) => {

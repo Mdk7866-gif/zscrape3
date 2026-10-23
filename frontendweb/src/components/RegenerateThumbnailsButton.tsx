@@ -115,24 +115,20 @@ export default function RegenerateThumbnailsButton() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let complete = false;
 
       // NDJSON: one JSON object per line, so a long run reports as it goes.
       // A chunk boundary can split a line, hence the retained buffer.
       for (;;) {
         const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        if (value) buffer += decoder.decode(value, { stream: true });
+        if (done) buffer += decoder.decode() + "\n";
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          let event;
-          try {
-            event = JSON.parse(line);
-          } catch {
-            continue;
-          }
+          const event = JSON.parse(line);
           if (event.type === "start") {
             setProgress({ done: 0, total: event.total });
           } else if (event.type === "progress") {
@@ -141,9 +137,14 @@ export default function RegenerateThumbnailsButton() {
             else if (event.status === "failed") failedSoFar += 1;
           } else if (event.type === "error") {
             throw new Error(event.message);
+          } else if (event.type === "complete") {
+            complete = true;
           }
         }
+        if (done) break;
       }
+
+      if (!complete) throw new Error("The connection ended before completion. Finished thumbnail updates are saved; retry to continue.");
 
       finish(updatedSoFar, failedSoFar, false);
     } catch (err) {

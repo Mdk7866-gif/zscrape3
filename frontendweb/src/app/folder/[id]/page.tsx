@@ -104,7 +104,11 @@ function roundRobinByPlatform(items: Video[]): Video[] {
 
 export default function FolderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: folderId } = use(params);
+  const { isAdmin, checking } = useAdmin();
+  return <FolderContent key={`${folderId}:${isAdmin}:${checking}`} folderId={folderId} />;
+}
 
+function FolderContent({ folderId }: { folderId: string }) {
   const [videos, setVideos] = useState<Video[]>([]);
   const [folderName, setFolderName] = useState("");
   const [folderCreatedAt, setFolderCreatedAt] = useState("");
@@ -138,26 +142,19 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   } = useDownloadQueue();
   const { isAdmin, checking } = useAdmin();
 
-  const fetchVideos = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch(`/video/fetchall?folder_id=${folderId}`);
-      // 404 here means this folder isn't visible in the current workspace —
-      // e.g. an admin folder after exiting admin mode, or a stale/guessed URL.
+  const fetchVideos = () => {
+    return apiFetch(`/video/fetchall?folder_id=${folderId}`).then(async (res) => {
       if (res.status === 404) throw new Error("This folder is not available.");
       if (!res.ok) throw new Error("Failed to fetch videos");
       setVideos(await res.json());
-    } catch (err) {
+      setError(null);
+    }).catch((err: unknown) => {
       setError(err instanceof Error ? err.message : "Failed to fetch videos");
-    } finally {
-      setLoading(false);
-    }
+    }).finally(() => setLoading(false));
   };
 
-  const fetchFolderInfo = async () => {
-    try {
-      const res = await apiFetch("/folder/fetchall");
+  const fetchFolderInfo = () => {
+    return apiFetch("/folder/fetchall").then(async (res) => {
       if (!res.ok) return;
       const data = await res.json();
       const folder = data.find((f: { id: string }) => f.id === folderId);
@@ -167,9 +164,9 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
         setFolderUpdatedAt(folder.updated_at || "");
         setFolderLastActivity(folder.last_activity || "");
       }
-    } catch {
+    }).catch(() => {
       /* the header just stays on its placeholder */
-    }
+    });
   };
 
   // Also re-runs when the workspace changes, so exiting admin mode on an admin
@@ -177,8 +174,6 @@ export default function FolderPage({ params }: { params: Promise<{ id: string }>
   // leaving the previous workspace's videos on screen.
   useEffect(() => {
     if (checking) return;
-    setPage(1);
-    setQuery("");
     fetchVideos();
     fetchFolderInfo();
     loadFolderStatuses(folderId);

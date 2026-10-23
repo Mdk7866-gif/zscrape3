@@ -5,6 +5,7 @@ import AlertMessagePopUp from "@/components/AlertMessagePopUp";
 import ConformationMessagePopUp from "@/components/ConformationMessagePopUp";
 import { apiFetch } from "@/lib/api";
 import { useModal } from "@/lib/useModal";
+import { useAdmin } from "@/components/AdminContext";
 
 interface FailedUrl {
   id: string;
@@ -44,6 +45,12 @@ const TrashIcon = () => (
 type Tab = "all" | "tiktok" | "other";
 
 export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlShowPopUpCardProps) {
+  const { isAdmin, checking } = useAdmin();
+  return <FailedUrlContent key={`${folderId}:${isAdmin}:${checking}`} folderId={folderId} onClose={onClose} />;
+}
+
+function FailedUrlContent({ folderId, onClose }: FailedUrlShowPopUpCardProps) {
+  const { isAdmin, checking } = useAdmin();
   const [urls, setUrls] = useState<FailedUrl[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,24 +68,19 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
 
   const dialogRef = useModal<HTMLDivElement>(onClose);
 
-  const fetchUrls = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await apiFetch(`/failed-urls/fetchall?folder_id=${folderId}`);
+  const fetchUrls = useCallback(() => {
+    return apiFetch(`/failed-urls/fetchall?folder_id=${folderId}`).then(async (res) => {
       if (!res.ok) throw new Error("Failed to load failed URLs");
-      const data = await res.json();
-      setUrls(data);
-    } catch (err) {
+      setUrls(await res.json());
+      setError(null);
+    }).catch((err: unknown) => {
       setError(err instanceof Error ? err.message : "Failed to load failed URLs");
-    } finally {
-      setLoading(false);
-    }
+    }).finally(() => setLoading(false));
   }, [folderId]);
 
   useEffect(() => {
-    fetchUrls();
-  }, [fetchUrls]);
+    if (!checking) fetchUrls();
+  }, [fetchUrls, checking, isAdmin]);
 
   const tiktokUrls = urls.filter((u) => isTiktokUrl(u.url));
   const otherUrls = urls.filter((u) => !isTiktokUrl(u.url));
@@ -132,7 +134,10 @@ export default function FailedUrlShowPopUpCard({ folderId, onClose }: FailedUrlS
     const toDelete = tab === "tiktok" ? tiktokUrls : otherUrls;
     try {
       await Promise.all(
-        toDelete.map((u) => apiFetch(`/failed-urls/delete/${u.id}`, { method: "DELETE" }))
+        toDelete.map(async (u) => {
+          const res = await apiFetch(`/failed-urls/delete/${u.id}`, { method: "DELETE" });
+          if (!res.ok) throw new Error("Delete failed");
+        })
       );
       const ids = new Set(toDelete.map((u) => u.id));
       setUrls((prev) => prev.filter((u) => !ids.has(u.id)));

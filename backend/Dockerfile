@@ -33,11 +33,13 @@ RUN curl -fsSL -o /tmp/deno.zip \
     && deno --version
 
 # Copy requirements and metadata files
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 
-# Install dependencies
-RUN pip install --no-cache-dir hatchling && \
-    pip install --no-cache-dir .
+# Use the tested dependency graph rather than resolving newer packages on each
+# rebuild. The application itself is imported through PYTHONPATH after COPY.
+RUN pip install --no-cache-dir uv==0.9.16 && \
+    uv sync --frozen --no-dev --no-install-project
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy the rest of the application
 COPY . .

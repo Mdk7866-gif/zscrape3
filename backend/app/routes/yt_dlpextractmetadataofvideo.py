@@ -18,6 +18,8 @@ from app.ytdlp_common import (
     HAS_COOKIES as _HAS_COOKIES,
 )
 
+from app.platforms import get_platform
+
 logger = logging.getLogger(__name__)
 
 # Ships with the ffmpeg install yt-dlp's remuxer already requires (and with the
@@ -32,28 +34,15 @@ _USER_AGENT = (
 )
 
 def _get_platform(url: str) -> str:
-    """Detect platform from URL."""
-    url_lower = url.lower()
-    if "twitter.com" in url_lower or "x.com" in url_lower:
-        return "twitter"
-    if "instagram.com" in url_lower:
-        return "instagram"
-    if "reddit.com" in url_lower or "redd.it" in url_lower:
-        return "reddit"
-    if "youtube.com" in url_lower or "youtu.be" in url_lower:
-        return "youtube"
-    if "tiktok.com" in url_lower:
-        return "tiktok"
-    if "facebook.com" in url_lower or "fb.watch" in url_lower:
-        return "facebook"
-    return "unknown"
+    return get_platform(url, default="unknown")
+
 
 def _resolve_google_share_url(url: str) -> str:
     """
     Google share links (e.g. share.google/XXXXX) redirect via Google Search/Image pages.
     Use curl_cffi with browser impersonation to follow redirects and extract imgrefurl or final target URL.
     """
-    if "share.google" not in url.lower():
+    if urlparse(url).hostname != "share.google":
         return url
     if not _curl_requests:
         logger.warning(f"curl_cffi is missing, cannot resolve Google share link {url!r}")
@@ -114,9 +103,9 @@ def resolve_share_url(url: str) -> str:
     original Reddit ``/s/<share-id>`` link is useful, but yt-dlp cannot always
     follow it itself; passing its resolved post URL avoids a generic 403.
     """
-    if "share.google" in url.lower():
+    if urlparse(url).hostname == "share.google":
         return _resolve_google_share_url(url)
-    if "reddit.com" in url.lower() or "redd.it" in url.lower():
+    if get_platform(url) == "reddit":
         return _resolve_reddit_share_url(url)
     return url
 

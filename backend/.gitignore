@@ -16,7 +16,6 @@ env/
 # uv package manager
 # =========================
 .uv/
-uv.lock
 
 # =========================
 # Build & packaging

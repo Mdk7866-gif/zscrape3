@@ -1,3 +1,16 @@
+# Before publishing
+
+From `backend/`, run `uv run python -m unittest discover -s tests -v`,
+`uv run ruff check app tests`, and `uv run python -m app.checkup`.
+From `frontendweb/`, run `npm run lint`, `npx tsc --noEmit`,
+`npm audit --audit-level=high`, and `npm run build`.
+GitHub Actions also runs regression, lint, type, audit, and build checks.
+
+The backend image installs the frozen `uv.lock` dependency graph. Regenerate
+frontend lockfiles using `node:20-alpine`, matching the Dockerfile, then check
+`npm ci` in that image before pushing. Never commit `.env` or `cookies.txt`;
+cookies remain local and are mounted by Compose at runtime.
+
 # Section 1: build + push Docker images
 
 Run from: `c:\Users\ASUS\OneDrive\Desktop\zscrape3`

@@ -5,6 +5,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from app.config import get_settings, Settings
+from app.platforms import get_platform
 from app.schemas.url_checker import ChatRequest, ChatResponse
 
 router = APIRouter(
@@ -105,19 +106,9 @@ async def chat_query(
     
     # Group URLs by platform for round-robin interleaving
     def get_platform_key(url: str) -> str:
-        url_lower = url.lower()
-        if "twitter.com" in url_lower or "x.com" in url_lower:
-            return "twitter"
-        if "instagram.com" in url_lower:
-            return "instagram"
-        if "reddit.com" in url_lower or "redd.it" in url_lower:
-            return "reddit"
-        if "youtube.com" in url_lower or "youtu.be" in url_lower:
-            return "youtube"
-        if "tiktok.com" in url_lower:
-            return "tiktok"
-        if "facebook.com" in url_lower or "fb.watch" in url_lower:
-            return "facebook"
+        platform = get_platform(url)
+        if platform != "other":
+            return platform
         try:
             parsed = urllib.parse.urlparse(url)
             if parsed.netloc:

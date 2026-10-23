@@ -118,41 +118,47 @@ export default function ChatgptUrlCheckerPopUpCard({
 
       if (!bulkRes.ok) throw new Error("Failed to upload URLs to database");
 
-      const reader = bulkRes.body!.getReader();
+      if (!bulkRes.body) throw new Error("No response from the server.");
+      const reader = bulkRes.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
       let saved = 0;
       let duplicates = 0;
       let failed = 0;
+      let complete = false;
 
       for (;;) {
         const { value, done } = await reader.read();
         if (value) buffer += decoder.decode(value, { stream: true });
+        if (done) buffer += decoder.decode() + "\n";
 
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          try {
-            const data = JSON.parse(line);
-            if (data.type === "start") {
-              setStatusText(`Preparing ${data.total} videos…`);
-              setProgress({ done: 0, total: data.total });
-            } else if (data.type === "progress") {
-              setStatusText(`Adding videos… (${data.processed}/${data.total})`);
-              setProgress({ done: data.processed, total: data.total });
-            } else if (data.type === "complete") {
-              saved = data.saved;
-              duplicates = data.duplicates;
-              failed = data.failed;
-            }
-          } catch {
-            console.error("Failed to parse stream chunk", line);
+          const data = JSON.parse(line);
+          if (data.type === "start") {
+            setStatusText(`Preparing ${data.total} videos…`);
+            setProgress({ done: 0, total: data.total });
+          } else if (data.type === "progress") {
+            setStatusText(`Adding videos… (${data.processed}/${data.total})`);
+            setProgress({ done: data.processed, total: data.total });
+          } else if (data.type === "complete") {
+            complete = true;
+            saved = data.saved;
+            duplicates = data.duplicates;
+            failed = data.failed;
+          } else if (data.type === "error") {
+            throw new Error(data.message || "Upload failed.");
           }
         }
         if (done) break;
+      }
+
+      if (!complete) {
+        throw new Error("The upload connection ended before completion. Some videos may have been saved. Refresh the folder and retry; saved URLs will be skipped as duplicates.");
       }
 
       setAlert({

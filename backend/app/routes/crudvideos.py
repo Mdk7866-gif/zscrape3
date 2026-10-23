@@ -1,17 +1,18 @@
 import logging
 import time
+import json
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from uuid import UUID
 from datetime import date
 
 from app.supabase import supabase
+from app.config import settings
 from app.admin_auth import AdminFlag, assert_folder_visible, assert_video_visible
 from app.schemas.video import (
     VideoOut,
     VideoDeleteResponse,
     BulkVideoUploadRequest,
-    BulkVideoUploadResponse,
-    BulkVideoItem,
     RegenerateThumbnailsRequest,
 )
 from app.routes.yt_dlpextractmetadataofvideo import extract_video_metadata
@@ -68,9 +69,6 @@ def delete_video(video_id: UUID, admin: AdminFlag):
         raise HTTPException(status_code=500, detail="Failed to delete video")
 
 
-from fastapi.responses import StreamingResponse
-import json
-
 @router.post("/bulk-upload")
 def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
     """
@@ -80,6 +78,11 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
     # Checked before the stream opens — once StreamingResponse starts, raising
     # an HTTPException can no longer produce a proper error status.
     assert_folder_visible(request.folder_id, admin)
+    if len(request.urls) > settings.MAX_BULK_URLS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Process at most {settings.MAX_BULK_URLS} URLs per batch.",
+        )
 
     def event_stream():
         urls = []
@@ -135,12 +138,18 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
             except Exception as e:
                 logger.warning(f"Could not clear {u} from failed_save_urls: {e}")
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        executor = ThreadPoolExecutor(max_workers=5)
+        try:
             futures = {executor.submit(fetch_meta, url): url for url in urls}
             processed = 0
 
             for future in as_completed(futures):
-                raw_url, metadata = future.result()
+                raw_url = futures[future]
+                try:
+                    _, metadata = future.result()
+                except Exception:
+                    logger.exception("Metadata worker failed for %s", raw_url)
+                    metadata = None
                 processed += 1
 
                 if metadata is None:
@@ -172,6 +181,8 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
                         "file_size_bytes": metadata.get("file_size_bytes"),
                     }
                     response = supabase.table("videos").insert(insert_data).execute()
+                    if not response.data:
+                        raise RuntimeError("Database returned no saved video")
 
                     if response.data:
                         inserted_id = response.data[0]["id"]
@@ -200,6 +211,10 @@ def bulk_upload_videos(request: BulkVideoUploadRequest, admin: AdminFlag):
                         failed_count += 1
                         record_folder_activity(str(request.folder_id), VIDEO_ADD_FAILED)
                         yield json.dumps({"type": "progress", "processed": processed, "total": total, "status": "failed"}) + "\n"
+
+        finally:
+            # A closed stream must not drain the remaining extraction queue.
+            executor.shutdown(wait=False, cancel_futures=True)
 
         yield json.dumps({"type": "complete", "saved": saved_count, "duplicates": duplicate_count, "failed": failed_count}) + "\n"
 
